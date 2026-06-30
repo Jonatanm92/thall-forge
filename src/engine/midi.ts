@@ -34,6 +34,16 @@ export function songToMidi(song: Song): Midi {
   const midi = new Midi();
   midi.header.setTempo(song.bpm);
 
+  // Write tempo automation events if a tempoMap is present
+  if (song.tempoMap && song.tempoMap.length > 0) {
+    // Clear any existing tempos and write the full map
+    midi.header.tempos = [];
+    for (const evt of song.tempoMap) {
+      const timeInSeconds = barToTime(evt.bar, song);
+      midi.header.tempos.push({ ticks: midi.header.secondsToTicks(timeInSeconds), bpm: evt.bpm });
+    }
+  }
+
   // Group tracks by role so each role becomes one MIDI track.
   const roleTracks = new Map<TrackRole, { name: string; events: { time: number; duration: number; midi: number; velocity: number }[] }>();
 
@@ -50,18 +60,23 @@ export function songToMidi(song: Song): Midi {
           { name: track.name, events: [] };
         for (const hit of track.hits) {
           const t = (baseStep + hit.step + (hit.microShift ?? 0)) * spStep;
+          // Apply per-repeat velocity scaling for dynamic builds
+          const repeatScale = section.repeats > 1
+            ? 0.85 + (rep / (section.repeats - 1)) * 0.2
+            : 1.0;
+          const vel = Math.max(0, Math.min(1, hit.velocity * repeatScale));
           entry.events.push({
             time: Math.max(0, t),
             duration: Math.max(spStep * 0.5, hit.duration * spStep),
             midi: hit.pitch,
-            velocity: hit.velocity,
+            velocity: vel,
           });
           hit.voicing?.forEach((p) =>
             entry.events.push({
               time: Math.max(0, t),
               duration: Math.max(spStep * 0.5, hit.duration * spStep),
               midi: p,
-              velocity: hit.velocity,
+              velocity: vel,
             }),
           );
         }
@@ -86,6 +101,33 @@ export function songToMidi(song: Song): Midi {
   }
 
   return midi;
+}
+
+/**
+ * Convert a bar number to seconds assuming a constant tempo (base BPM).
+ * For tempo-mapped songs this is an approximation used for MIDI header placement.
+ */
+function barToTime(bar: number, song: Song): number {
+  // Walk through sections to figure out beats-per-bar up to the target bar
+  let currentBar = 0;
+  let currentTime = 0;
+  const baseBpm = song.bpm;
+  const spBeat = 60 / baseBpm; // seconds per beat at base tempo
+
+  for (const section of song.sections) {
+    const sectionBars = section.repeats * Math.ceil(
+      section.pattern.length / (section.pattern.beatsPerBar * section.pattern.stepsPerBeat)
+    );
+    if (currentBar + sectionBars > bar) {
+      const remainingBars = bar - currentBar;
+      currentTime += remainingBars * section.pattern.beatsPerBar * spBeat;
+      return currentTime;
+    }
+    currentTime += sectionBars * section.pattern.beatsPerBar * spBeat;
+    currentBar += sectionBars;
+  }
+  // Past the end of the song, extrapolate
+  return currentTime + (bar - currentBar) * 4 * spBeat;
 }
 
 /** Export a single pattern (e.g. just the current riff loop) to MIDI. */

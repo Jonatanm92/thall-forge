@@ -70,6 +70,14 @@ export interface Section {
   pattern: Pattern;
 }
 
+/** A tempo change point for tempo automation. */
+export interface TempoEvent {
+  /** Bar number (0-based) where the tempo change occurs. */
+  bar: number;
+  /** New BPM value at this bar. */
+  bpm: number;
+}
+
 /** A full generated song. */
 export interface Song {
   title: string;
@@ -80,7 +88,12 @@ export interface Song {
   sections: Section[];
   /** Free-form notes from the generator about the creative choices made. */
   notes: string[];
+  /** Optional tempo automation map for tempo drops/ramps. */
+  tempoMap?: TempoEvent[];
 }
+
+/** Available song form presets for the arranger. */
+export type SongFormId = 'standard' | 'progressive' | 'short' | 'extended';
 
 /** A guitar tuning, lowest string first, expressed as MIDI note numbers. */
 export interface Tuning {
@@ -134,4 +147,6 @@ export interface GenerationParams {
   swing: number;
   /** Deterministic seed so a "generation" can be reproduced. */
   seed: number;
+  /** Song form / structure preset for the arranger. */
+  songForm: SongFormId;
 }

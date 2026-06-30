@@ -7,6 +7,8 @@ import { GenControls, DEFAULT_PARAMS } from './GenControls';
 import { randomSeed } from '../engine/random';
 import { generateSong } from '../engine/arranger';
 import { songToMidi, downloadMidi } from '../engine/midi';
+import { downloadMarkers } from '../engine/markers';
+import type { MarkerFormat } from '../engine/markers';
 import { player } from '../audio/playback';
 import { parseSongPrompt } from '../ai/promptToParams';
 import { renderSongToWav, renderSongStems } from '../audio/exportWav';
@@ -91,6 +93,11 @@ export function SongForge() {
     downloadMidi(midi, `${song.title.replace(/\s+/g, '-').toLowerCase()}`);
   };
 
+  const onExportMarkers = (format: MarkerFormat) => {
+    if (!song) return;
+    downloadMarkers(song, format);
+  };
+
   const onExportWav = async () => {
     if (!song) return;
     setRendering('Rendering WAV mix...');
@@ -169,6 +176,12 @@ export function SongForge() {
           </button>
           <button onClick={onExportStems} disabled={!song || rendering !== null}>
             {rendering === 'Rendering stems...' ? '⏳ Rendering...' : '⬇ Export Stems (ZIP)'}
+          </button>
+          <button onClick={() => onExportMarkers('reaper-csv')} disabled={!song}>
+            ⬇ Markers (CSV)
+          </button>
+          <button onClick={() => onExportMarkers('json')} disabled={!song}>
+            ⬇ Markers (JSON)
           </button>
         </div>
         <label className="toggle-label">

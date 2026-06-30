@@ -2,7 +2,7 @@
 
 import { Slider, Select } from './Controls';
 import { TUNINGS, KEYS, SCALE_NAMES } from '../engine/theory';
-import type { GenerationParams, GrooveStyle, ScaleName } from '../engine/types';
+import type { GenerationParams, GrooveStyle, ScaleName, SongFormId } from '../engine/types';
 
 export const DEFAULT_PARAMS: GenerationParams = {
   style: 'thall',
@@ -20,6 +20,7 @@ export const DEFAULT_PARAMS: GenerationParams = {
   humanize: 0.3,
   swing: 0,
   seed: 1337,
+  songForm: 'standard',
 };
 
 const STYLES: { value: GrooveStyle; label: string }[] = [
@@ -28,6 +29,13 @@ const STYLES: { value: GrooveStyle; label: string }[] = [
   { value: 'progressive', label: 'Progressive metal' },
   { value: 'deathcore', label: 'Deathcore (breakdown)' },
   { value: 'ambient-djent', label: 'Ambient djent' },
+];
+
+const SONG_FORM_OPTIONS: { value: SongFormId; label: string }[] = [
+  { value: 'standard', label: 'Standard (verse/chorus/breakdown)' },
+  { value: 'progressive', label: 'Progressive (bridge/solo/odd meter)' },
+  { value: 'short', label: 'Short (~2 min, verse/chorus)' },
+  { value: 'extended', label: 'Extended (double chorus + bridge)' },
 ];
 
 const SCALE_LABELS: Record<ScaleName, string> = {
@@ -52,6 +60,12 @@ export function GenControls({ params, onChange }: Props) {
   return (
     <div className="gen-controls">
       <Select label="Style" value={params.style} options={STYLES} onChange={(v) => set('style', v)} />
+      <Select
+        label="Song Form"
+        value={params.songForm}
+        options={SONG_FORM_OPTIONS}
+        onChange={(v) => set('songForm', v)}
+      />
       <Select
         label="Tuning"
         value={params.tuningId}

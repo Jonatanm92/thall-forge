@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Song structure enhancements: section transitions, dynamic builds, tempo/key automation, and DAW integration exports (tempo map, markers). Make the generated songs sound more professional and give users tools to import them into DAWs with proper section markers and tempo information.",
+  "status": "in_progress",
+  "steps": [
+    "Enhance src/engine/arranger.ts: add transition logic between sections -- crash cymbal + fill on the last beat of a section, intensity ramps (e.g. crescendo into chorus, decrescendo into breakdown). Add a 'transition' hit pattern that bridges sections rather than hard-cutting.",
+    "Add dynamic automation to arranger.ts: velocity curves within sections (e.g. verse starts quieter, builds toward pre-chorus). Implement per-section velocity multiplier that ramps across repeats.",
+    "Add tempo automation support: extend the Song type in src/engine/types.ts with an optional tempoMap array [{bar: number, bpm: number}] for tempo ramps (e.g. breakdown slows 10 BPM). Update the arranger to optionally insert tempo changes at breakdowns. Update MIDI export in src/engine/midi.ts to write tempo change events.",
+    "Create src/engine/markers.ts: export song section markers as a format DAWs can import. Implement Reaper marker format (.csv with timecodes and names) and a generic JSON marker format with section name, start time (seconds), and bar number.",
+    "Wire marker/tempo-map export buttons into the SongForge UI alongside the existing MIDI export button.",
+    "Add more song forms to the arranger: alongside the existing SONG_FORM, add alternative structures (e.g. 'progressive' with more sections and odd meter, 'short' 2-minute form, 'extended' with bridge/solo section). Let the user pick a form or leave it random."
+  ],
+  "acceptance_criteria": [
+    "npm run build passes with no type errors",
+    "Song type includes optional tempoMap field",
+    "MIDI export writes tempo change events when tempoMap is present",
+    "Markers export produces downloadable .csv or JSON with section names and timestamps",
+    "Arranger generates transition fills between sections",
+    "Multiple song forms are available in the UI"
+  ],
+  "verification": ["Run `npm run build` in /projects/sandbox/thall-forge and confirm exit code 0"],
+  "blocked_reason": null,
+  "findings": ""
+}
