@@ -29,9 +29,20 @@ Three tools in one:
 - Both are honored identically by in-browser playback **and** the exported MIDI.
 
 ### Higher-fidelity sound
-- **Convolution cabs** — guitar (in both the song player and the live rig) runs through procedurally-rendered speaker-cab impulse responses, not just a low-pass.
-- **Fat, doubled guitars** — stacked detuned saws for a thick rhythm tone.
-- **Layered drums** — kick = body + beater click, snare = noise + tonal body, velocity-aware.
+- **Convolution cabs** — guitar runs through procedurally-rendered speaker-cab impulse responses.
+- **Fat, doubled guitars** — stacked detuned saws + stereo doubling (hard L/R panning with +5 cent detune + timing offset for the export).
+- **Layered drums** — kick = body + beater click, snare = noise + tonal body + rimshots, velocity-aware. Drum bus with parallel compression for punch.
+- **Dual-layer bass** — triangle sub + distorted sawtooth grit.
+- **Guitar articulations** — pinch harmonics, slides, hammer-ons generated contextually.
+- **Master mix bus** — compressor + EQ3 presence boost + limiter.
+
+### DAW workflow
+- **WAV export** — offline-render the full song (or single loop) to a downloadable 16-bit PCM WAV.
+- **Per-stem export** — isolated guitar, bass, drums, lead tracks bundled as a ZIP for mixing in your DAW.
+- **DAW markers** — export section markers as Reaper CSV or JSON (with timestamps).
+- **Tempo automation** — breakdowns auto-slow with tempo map preserved in song metadata.
+- **Multi-track MIDI** — guitar (ch1) + bass (ch2) + lead (ch3) + drums (ch10) in one file.
+- **Per-instrument mix panel** — adjust guitar/bass/drums/lead/master levels before export.
 
 ## Quick start
 
@@ -40,6 +51,8 @@ npm install
 npm run dev      # http://localhost:5173
 npm run build    # production build into dist/
 ```
+
+**Live demo:** [jonatanm92.github.io/thall-forge](https://jonatanm92.github.io/thall-forge/) (enable GitHub Pages in repo settings → Pages → Source: GitHub Actions)
 
 Audio starts on your first click (browser autoplay policy).
 
