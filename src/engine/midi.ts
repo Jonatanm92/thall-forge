@@ -35,14 +35,10 @@ export function songToMidi(song: Song): Midi {
   midi.header.setTempo(song.bpm);
 
   // Write tempo automation events if a tempoMap is present
-  if (song.tempoMap && song.tempoMap.length > 0) {
-    // Clear any existing tempos and write the full map
-    midi.header.tempos = [];
-    for (const evt of song.tempoMap) {
-      const timeInSeconds = barToTime(evt.bar, song);
-      midi.header.tempos.push({ ticks: midi.header.secondsToTicks(timeInSeconds), bpm: evt.bpm });
-    }
-  }
+  // NOTE: Disabled complex tempo-map writing to avoid @tonejs/midi internal
+  // hang when tempos array is mutated before note insertion. Instead we set the
+  // base tempo and embed tempo info in the markers export for DAW import.
+  // if (song.tempoMap && song.tempoMap.length > 0) { ... }
 
   // Group tracks by role so each role becomes one MIDI track.
   const roleTracks = new Map<TrackRole, { name: string; events: { time: number; duration: number; midi: number; velocity: number }[] }>();
@@ -105,9 +101,9 @@ export function songToMidi(song: Song): Midi {
 
 /**
  * Convert a bar number to seconds, walking the tempo map to account for
- * tempo changes (e.g. breakdown slow-downs).
+ * tempo changes (e.g. breakdown slow-downs). Exported for use in markers.
  */
-function barToTime(bar: number, song: Song): number {
+export function barToTime(bar: number, song: Song): number {
   // Build a sorted list of tempo change points (bar -> bpm)
   const tempoMap = song.tempoMap && song.tempoMap.length > 0
     ? [...song.tempoMap].sort((a, b) => a.bar - b.bar)
