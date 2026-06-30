@@ -330,6 +330,16 @@ function addTransitionFills(sections: Section[], _rng: Rng): void {
     const fillTrack = pat.tracks.find((t) => t.role === 'snare') ??
       pat.tracks.find((t) => t.role === 'tom');
     if (fillTrack) {
+      // Remove existing hits at the fill steps to avoid double-triggers
+      const fillSteps = new Set<number>();
+      for (let s = 0; s < pat.stepsPerBeat; s++) {
+        const step = lastBeatStart + s;
+        if (step < pat.length) {
+          fillSteps.add(step);
+        }
+      }
+      fillTrack.hits = fillTrack.hits.filter((h) => !fillSteps.has(h.step));
+
       // Add snare/tom hits on the last beat subdivisions
       const fillPitches = [DRUM.snare, DRUM.tomHigh, DRUM.tomMid, DRUM.snare];
       for (let s = 0; s < pat.stepsPerBeat; s++) {

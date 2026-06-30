@@ -71,7 +71,8 @@ export function RiffLab() {
     if (!pattern) return;
     setRendering(true);
     try {
-      const buffer = await renderPatternToWav(pattern, params.bpm, { stereoDouble: player.stereoDouble });
+      const mix = player.getMixLevels();
+      const buffer = await renderPatternToWav(pattern, params.bpm, { stereoDouble: player.stereoDouble, mix });
       const blob = audioBufferToWav(buffer);
       downloadWav(blob, `thall-forge-loop-${seedRef.current}.wav`);
     } finally {

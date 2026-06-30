@@ -66,6 +66,9 @@ export class ThallPlayer {
   private leadBus!: Tone.Gain;
   private masterGain!: Tone.Gain;
 
+  // Current mix settings (tracked for export)
+  private _mixLevels: MixSettings = { guitar: 1, bass: 1, drums: 1, lead: 1, master: 0.9 };
+
   private onStep: StepCallback | null = null;
 
   async init(): Promise<void> {
@@ -296,12 +299,18 @@ export class ThallPlayer {
 
   /** Set per-instrument mix levels (all values 0-1). */
   setMixLevels(mix: MixSettings): void {
+    this._mixLevels = { ...mix };
     if (!this.initialized) return;
     this.guitarBus.gain.rampTo(mix.guitar, 0.05);
     this.bassBus.gain.rampTo(mix.bass, 0.05);
     this.drumBus.gain.rampTo(mix.drums, 0.05);
     this.leadBus.gain.rampTo(mix.lead, 0.05);
     this.masterGain.gain.rampTo(mix.master, 0.05);
+  }
+
+  /** Get the current mix levels for use in offline rendering. */
+  getMixLevels(): MixSettings {
+    return { ...this._mixLevels };
   }
 
   /** Enable/disable stereo guitar doubling (L/R with detune + timing offset). */

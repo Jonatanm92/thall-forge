@@ -6,7 +6,7 @@
 
 import * as Tone from 'tone';
 import { midiToNote } from '../engine/theory';
-import type { Pattern, Song, TrackRole } from '../engine/types';
+import type { MixSettings, Pattern, Song, TrackRole } from '../engine/types';
 import { DRUM } from '../engine/drums';
 import { makeCabIR } from './ir';
 
@@ -15,6 +15,8 @@ import type { ScheduledNote } from './playback';
 export interface RenderOptions {
   /** Enable stereo guitar doubling (hard L/R with detune + timing offset). */
   stereoDouble?: boolean;
+  /** Per-instrument mix levels to apply during rendering. */
+  mix?: MixSettings;
 }
 
 /** Role groups for stem isolation. */
@@ -123,9 +125,12 @@ interface OfflineChain {
 async function buildChain(
   filterGroup: StemGroup | null,
   stereoDouble: boolean,
+  mix?: MixSettings,
 ): Promise<OfflineChain> {
+  const mixLevels = mix ?? { guitar: 1, bass: 1, drums: 1, lead: 1, master: 0.9 };
+
   // ---- Master mix bus chain (mirrors ThallPlayer.init()) ----
-  const masterGain = new Tone.Gain(0.9).toDestination();
+  const masterGain = new Tone.Gain(mixLevels.master).toDestination();
   const masterLimiter = new Tone.Limiter(-0.5).connect(masterGain);
   const masterEq = new Tone.EQ3({ low: 0, mid: 0, high: 2, highFrequency: 8000 }).connect(masterLimiter);
   const masterComp = new Tone.Compressor({
@@ -144,12 +149,12 @@ async function buildChain(
   }
 
   // ---- Per-instrument bus gains ----
-  const guitarBus = new Tone.Gain(1).connect(dest('guitar'));
-  const bassBus = new Tone.Gain(1).connect(dest('bass'));
-  const leadBus = new Tone.Gain(1).connect(dest('lead'));
+  const guitarBus = new Tone.Gain(mixLevels.guitar).connect(dest('guitar'));
+  const bassBus = new Tone.Gain(mixLevels.bass).connect(dest('bass'));
+  const leadBus = new Tone.Gain(mixLevels.lead).connect(dest('lead'));
 
   // ---- Drum bus with parallel compression ----
-  const drumBusNode = new Tone.Gain(1);
+  const drumBusNode = new Tone.Gain(mixLevels.drums);
   const drumDry = new Tone.Gain(1).connect(dest('drums'));
   drumBusNode.connect(drumDry);
   const drumCompressor = new Tone.Compressor({
@@ -518,11 +523,12 @@ export async function renderSongToWav(
 ): Promise<AudioBuffer> {
   const { notes, duration } = songToSchedule(song);
   const stereoDouble = options?.stereoDouble ?? false;
+  const mix = options?.mix;
   // Add a small tail for reverb/release
   const totalDuration = duration + 1.5;
 
   const buffer = await Tone.Offline(async () => {
-    const chain = await buildChain(null, stereoDouble);
+    const chain = await buildChain(null, stereoDouble, mix);
     for (const note of notes) {
       triggerNote(chain, note, note.time, stereoDouble, null);
     }
@@ -540,6 +546,7 @@ export async function renderSongStems(
 ): Promise<Map<string, AudioBuffer>> {
   const { notes, duration } = songToSchedule(song);
   const stereoDouble = options?.stereoDouble ?? false;
+  const mix = options?.mix;
   const totalDuration = duration + 1.5;
 
   const stems: StemGroup[] = ['guitar', 'bass', 'drums', 'lead'];
@@ -551,7 +558,7 @@ export async function renderSongStems(
     if (groupNotes.length === 0) continue;
 
     const buffer = await Tone.Offline(async () => {
-      const chain = await buildChain(group, stereoDouble && group === 'guitar');
+      const chain = await buildChain(group, stereoDouble && group === 'guitar', mix);
       for (const note of groupNotes) {
         triggerNote(chain, note, note.time, stereoDouble && group === 'guitar', group);
       }
@@ -573,10 +580,11 @@ export async function renderPatternToWav(
 ): Promise<AudioBuffer> {
   const { notes, duration } = patternToSchedule(pattern, bpm);
   const stereoDouble = options?.stereoDouble ?? false;
+  const mix = options?.mix;
   const totalDuration = duration + 1.5;
 
   const buffer = await Tone.Offline(async () => {
-    const chain = await buildChain(null, stereoDouble);
+    const chain = await buildChain(null, stereoDouble, mix);
     for (const note of notes) {
       triggerNote(chain, note, note.time, stereoDouble, null);
     }

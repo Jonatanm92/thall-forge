@@ -104,30 +104,68 @@ export function songToMidi(song: Song): Midi {
 }
 
 /**
- * Convert a bar number to seconds assuming a constant tempo (base BPM).
- * For tempo-mapped songs this is an approximation used for MIDI header placement.
+ * Convert a bar number to seconds, walking the tempo map to account for
+ * tempo changes (e.g. breakdown slow-downs).
  */
 function barToTime(bar: number, song: Song): number {
-  // Walk through sections to figure out beats-per-bar up to the target bar
+  // Build a sorted list of tempo change points (bar -> bpm)
+  const tempoMap = song.tempoMap && song.tempoMap.length > 0
+    ? [...song.tempoMap].sort((a, b) => a.bar - b.bar)
+    : [{ bar: 0, bpm: song.bpm }];
+
   let currentBar = 0;
   let currentTime = 0;
-  const baseBpm = song.bpm;
-  const spBeat = 60 / baseBpm; // seconds per beat at base tempo
 
   for (const section of song.sections) {
-    const sectionBars = section.repeats * Math.ceil(
+    const barsPerRepeat = Math.ceil(
       section.pattern.length / (section.pattern.beatsPerBar * section.pattern.stepsPerBeat)
     );
-    if (currentBar + sectionBars > bar) {
-      const remainingBars = bar - currentBar;
-      currentTime += remainingBars * section.pattern.beatsPerBar * spBeat;
+    const sectionBars = section.repeats * barsPerRepeat;
+    const sectionEnd = currentBar + sectionBars;
+
+    if (sectionEnd <= bar) {
+      // Accumulate the full section, bar by bar respecting tempo changes
+      currentTime += barsToSeconds(currentBar, sectionEnd, section.pattern.beatsPerBar, tempoMap);
+      currentBar = sectionEnd;
+    } else {
+      // Target bar is within this section
+      currentTime += barsToSeconds(currentBar, bar, section.pattern.beatsPerBar, tempoMap);
       return currentTime;
     }
-    currentTime += sectionBars * section.pattern.beatsPerBar * spBeat;
-    currentBar += sectionBars;
   }
-  // Past the end of the song, extrapolate
+  // Past the end of the song, extrapolate at the last known tempo
+  const lastBpm = tempoMap[tempoMap.length - 1].bpm;
+  const spBeat = 60 / lastBpm;
   return currentTime + (bar - currentBar) * 4 * spBeat;
+}
+
+/**
+ * Compute the elapsed time (in seconds) between two bar positions,
+ * walking the tempo map to use the correct BPM at each point.
+ */
+function barsToSeconds(
+  fromBar: number,
+  toBar: number,
+  beatsPerBar: number,
+  tempoMap: { bar: number; bpm: number }[],
+): number {
+  if (fromBar >= toBar) return 0;
+
+  let time = 0;
+
+  for (let i = 0; i < toBar - fromBar; i++) {
+    const barNum = fromBar + i;
+    // Find the active tempo at this bar (last tempo event at or before barNum)
+    let bpm = tempoMap[0].bpm;
+    for (const evt of tempoMap) {
+      if (evt.bar <= barNum) bpm = evt.bpm;
+      else break;
+    }
+    const spBeat = 60 / bpm;
+    time += beatsPerBar * spBeat;
+  }
+
+  return time;
 }
 
 /** Export a single pattern (e.g. just the current riff loop) to MIDI. */

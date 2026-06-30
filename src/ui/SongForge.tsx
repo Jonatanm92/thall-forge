@@ -27,6 +27,7 @@ export function SongForge() {
   const [parseNote, setParseNote] = useState<string | null>(null);
   const [stereoDouble, setStereoDouble] = useState(false);
   const [rendering, setRendering] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const seedRef = useRef(params.seed);
 
   const onDescribe = async () => {
@@ -102,10 +103,15 @@ export function SongForge() {
   const onExportWav = async () => {
     if (!song) return;
     setRendering('Rendering WAV mix...');
+    setExportError(null);
     try {
-      const buffer = await renderSongToWav(song, { stereoDouble });
+      const mix = player.getMixLevels();
+      const buffer = await renderSongToWav(song, { stereoDouble, mix });
       const blob = audioBufferToWav(buffer);
       downloadWav(blob, `${song.title.replace(/\s+/g, '-').toLowerCase()}.wav`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error during WAV export';
+      setExportError(`WAV export failed: ${message}`);
     } finally {
       setRendering(null);
     }
@@ -114,8 +120,10 @@ export function SongForge() {
   const onExportStems = async () => {
     if (!song) return;
     setRendering('Rendering stems...');
+    setExportError(null);
     try {
-      const stems = await renderSongStems(song, { stereoDouble });
+      const mix = player.getMixLevels();
+      const stems = await renderSongStems(song, { stereoDouble, mix });
       const zip = new JSZip();
       for (const [name, buffer] of stems) {
         const blob = audioBufferToWav(buffer);
@@ -130,6 +138,9 @@ export function SongForge() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error during stems export';
+      setExportError(`Stems export failed: ${message}`);
     } finally {
       setRendering(null);
     }
@@ -194,6 +205,7 @@ export function SongForge() {
           Stereo Double (L/R guitars)
         </label>
         {rendering && <p className="muted rendering-status">{rendering}</p>}
+        {exportError && <p className="error-status">{exportError}</p>}
         <MixPanel />
       </div>
 
