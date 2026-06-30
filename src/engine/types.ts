@@ -1,0 +1,124 @@
+// Core shared types for the Thall Forge generation engine.
+//
+// Everything in the engine works on a discrete step grid. The default
+// resolution is the 16th note (4 steps per beat), which is the backbone of
+// djent / thall rhythmic writing (syncopated palm-muted 16ths grouped in odd
+// numbers over a steady 4/4 pulse).
+
+/** A single musical event on the step grid. */
+export interface Hit {
+  /** Step index from the start of the pattern (0-based). */
+  step: number;
+  /** Duration in steps. */
+  duration: number;
+  /** MIDI pitch (0-127). For drums this is the GM percussion note. */
+  pitch: number;
+  /** Velocity 0-1. */
+  velocity: number;
+  /** Optional articulation flag used by the guitar/bass renderers. */
+  palmMute?: boolean;
+  /** Optional accent flag (ghost note when false-ish, accent when true). */
+  accent?: boolean;
+  /**
+   * Optional additional MIDI pitches sounded together with `pitch` (power
+   * chords / dyads). Absolute MIDI numbers, not intervals.
+   */
+  voicing?: number[];
+}
+
+/** A named lane of hits (e.g. "kick", "bass", "guitar"). */
+export interface Track {
+  name: string;
+  /** Instrument role, drives which synth/sampler renders it. */
+  role: TrackRole;
+  hits: Hit[];
+}
+
+export type TrackRole =
+  | 'kick'
+  | 'snare'
+  | 'hat'
+  | 'ride'
+  | 'crash'
+  | 'tom'
+  | 'bass'
+  | 'guitar'
+  | 'lead';
+
+/** A self-contained block of music with a fixed length in steps. */
+export interface Pattern {
+  /** Total length in steps. */
+  length: number;
+  /** Steps per beat (4 = 16th-note grid). */
+  stepsPerBeat: number;
+  /** Beats per bar (time signature numerator). */
+  beatsPerBar: number;
+  tracks: Track[];
+}
+
+/** A labelled section of a song (intro, verse, chorus, ...). */
+export interface Section {
+  id: string;
+  name: string;
+  /** Number of times this pattern repeats. */
+  repeats: number;
+  pattern: Pattern;
+}
+
+/** A full generated song. */
+export interface Song {
+  title: string;
+  bpm: number;
+  tuning: Tuning;
+  key: string;
+  scale: ScaleName;
+  sections: Section[];
+  /** Free-form notes from the generator about the creative choices made. */
+  notes: string[];
+}
+
+/** A guitar tuning, lowest string first, expressed as MIDI note numbers. */
+export interface Tuning {
+  id: string;
+  name: string;
+  /** MIDI note numbers, low to high. */
+  strings: number[];
+}
+
+export type ScaleName =
+  | 'phrygian'
+  | 'phrygian-dominant'
+  | 'aeolian'
+  | 'locrian'
+  | 'harmonic-minor'
+  | 'dorian'
+  | 'chromatic';
+
+/** Sub-styles within the broad thall / modern-metal umbrella. */
+export type GrooveStyle =
+  | 'thall'
+  | 'djent'
+  | 'progressive'
+  | 'deathcore'
+  | 'ambient-djent';
+
+/** Parameters that drive a full generation pass. */
+export interface GenerationParams {
+  style: GrooveStyle;
+  bpm: number;
+  tuningId: string;
+  key: string;
+  scale: ScaleName;
+  /** 0..1 — how busy / technical the output is. */
+  complexity: number;
+  /** 0..1 — how much syncopation / off-grid displacement. */
+  syncopation: number;
+  /** Length of a single pattern in bars. */
+  barsPerPattern: number;
+  /** Time signature numerator (beats per bar). 4 = 4/4, 7 = 7/8 feel, etc. */
+  beatsPerBar: number;
+  /** Allow the arranger to shift some sections into odd meters. */
+  allowMeterShifts: boolean;
+  /** Deterministic seed so a "generation" can be reproduced. */
+  seed: number;
+}

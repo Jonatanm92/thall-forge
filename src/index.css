@@ -1,0 +1,15 @@
+:root {
+  font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  color-scheme: dark;
+}
+
+* { margin: 0; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: #0a0a0d;
+  -webkit-font-smoothing: antialiased;
+}
