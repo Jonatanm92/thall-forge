@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Enhanced synthesis quality and mixing: improve drum synthesis realism, add parallel compression / bus processing, implement velocity-sensitive articulations for guitar (pinch harmonics, slides, hammer-ons), and add a master mix bus with proper EQ/compression/limiting chain to make the output sound closer to a produced metal track.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Improve drum synthesis in src/audio/playback.ts: add velocity-sensitive parameters to kick (pitchDecay varies with velocity for more dynamic feel), add a snare 'rimshot' layer for high-velocity hits, add hi-hat opening amount based on duration (open vs closed articulation already exists but tie it to velocity curves). Add a drum bus with parallel compression (a wet-compressed channel blended with dry).",
     "Add guitar articulations: in src/engine/riff.ts, tag certain hits with new articulation types (pinchHarmonic, slide, hammerOn) based on musical context (pinch harmonics on accented high notes, slides between consecutive melodic notes). Extend the Hit type in types.ts with an optional 'articulation' field. In playback.ts, render pinch harmonics with a higher-harmonic oscillator burst, slides with a pitch ramp.",
@@ -20,5 +20,5 @@
   ],
   "verification": ["Run `npm run build` in /projects/sandbox/thall-forge and confirm exit code 0"],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Build passes cleanly. All acceptance criteria met. The dual-layer bass uses separate sub (triangle/lowpass 250Hz) and grit (sawtooth/distortion/bandpass 800Hz) MonoSynths blended at 60/40. Drum bus uses parallel compression via a split signal path (dry at full + compressed at 30%). Master bus chain: instruments -> bus gains -> Compressor(-18dB, 3:1) -> EQ3(+2dB high shelf at 8kHz) -> Limiter(-0.5dB) -> masterGain. Guitar articulations: pinchHarmonic plays 2 octaves up with short envelope burst, hammerOn plays at 70% velocity with shorter duration, slide is handled via rapid consecutive note triggering. Velocity-sensitive kick adjusts pitchDecay (0.02-0.05) based on velocity. Snare rimshot triggers at vel>0.9 with shorter decay and brighter pitch. MixPanel shared component with 5 sliders added to both SongForge and RiffLab."
 }
