@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Song structure enhancements: section transitions, dynamic builds, tempo/key automation, and DAW integration exports (tempo map, markers). Make the generated songs sound more professional and give users tools to import them into DAWs with proper section markers and tempo information.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Enhance src/engine/arranger.ts: add transition logic between sections -- crash cymbal + fill on the last beat of a section, intensity ramps (e.g. crescendo into chorus, decrescendo into breakdown). Add a 'transition' hit pattern that bridges sections rather than hard-cutting.",
     "Add dynamic automation to arranger.ts: velocity curves within sections (e.g. verse starts quieter, builds toward pre-chorus). Implement per-section velocity multiplier that ramps across repeats.",
@@ -21,5 +21,5 @@
   ],
   "verification": ["Run `npm run build` in /projects/sandbox/thall-forge and confirm exit code 0"],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Build passes cleanly. All acceptance criteria met. The tempo map uses @tonejs/midi header.tempos array directly. Per-repeat velocity scaling is split between arranger (base pattern scaling to midpoint) and MIDI export (per-repeat ramp from 0.85 to 1.05). The transition fills add hits to existing snare/tom tracks rather than creating new tracks. Song forms use the same SectionBlueprint type and riffKey-based skeleton caching. Marker export uses the same Blob+anchor download pattern as MIDI export."
 }
