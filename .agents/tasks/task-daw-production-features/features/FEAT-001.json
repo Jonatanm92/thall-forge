@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "WAV audio export with per-stem rendering. Use Tone.Offline to render the full song (or pattern) to audio offline, then let the user download it as a stereo WAV mix and optionally as individual stems (guitar, bass, drums, lead). Also add stereo guitar doubling (left/right rhythm tracks panned hard L/R with slight detune/timing offset for realistic doubled guitars). This is the single most important DAW workflow feature.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/audio/exportWav.ts: implement renderSongToWav(song: Song) using Tone.Offline that re-creates the ThallPlayer signal chain inside an offline context. Return the rendered AudioBuffer. Also implement renderSongStems(song: Song) that renders each role group (guitar, bass, drums, lead) individually by muting everything else.",
     "Add a WAV encoding utility (PCM 16-bit WAV from AudioBuffer) in the same file or a helper (src/audio/wavEncoder.ts). Use standard RIFF/WAVE header construction -- no external dependencies needed.",
@@ -21,5 +21,5 @@
   ],
   "verification": ["Run `npm run build` in /projects/sandbox/thall-forge and confirm exit code 0"],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Build passes cleanly. JSZip added as dependency for stem ZIP bundling. The Tone.Offline approach requires recreating the entire signal chain inside the offline callback (cannot reuse live player instances). Stereo doubling uses separate PolySynth instances for L and R channels with Panner nodes. The CabIR rendering via makeCabIR works inside Tone.Offline context using the offline sampleRate. No test framework in the project so verification is build-only."
 }
