@@ -9,6 +9,9 @@ import { generateSong } from '../engine/arranger';
 import { songToMidi, downloadMidi } from '../engine/midi';
 import { player } from '../audio/playback';
 import { parseSongPrompt } from '../ai/promptToParams';
+import { renderSongToWav, renderSongStems } from '../audio/exportWav';
+import { audioBufferToWav, downloadWav } from '../audio/wavEncoder';
+import JSZip from 'jszip';
 import type { GenerationParams, Song } from '../engine/types';
 
 export function SongForge() {
@@ -19,6 +22,8 @@ export function SongForge() {
   const [desc, setDesc] = useState('Heavy thall in drop F, dissonant, slow and bouncy, odd time');
   const [parsing, setParsing] = useState(false);
   const [parseNote, setParseNote] = useState<string | null>(null);
+  const [stereoDouble, setStereoDouble] = useState(false);
+  const [rendering, setRendering] = useState<string | null>(null);
   const seedRef = useRef(params.seed);
 
   const onDescribe = async () => {
@@ -86,6 +91,47 @@ export function SongForge() {
     downloadMidi(midi, `${song.title.replace(/\s+/g, '-').toLowerCase()}`);
   };
 
+  const onExportWav = async () => {
+    if (!song) return;
+    setRendering('Rendering WAV mix...');
+    try {
+      const buffer = await renderSongToWav(song, { stereoDouble });
+      const blob = audioBufferToWav(buffer);
+      downloadWav(blob, `${song.title.replace(/\s+/g, '-').toLowerCase()}.wav`);
+    } finally {
+      setRendering(null);
+    }
+  };
+
+  const onExportStems = async () => {
+    if (!song) return;
+    setRendering('Rendering stems...');
+    try {
+      const stems = await renderSongStems(song, { stereoDouble });
+      const zip = new JSZip();
+      for (const [name, buffer] of stems) {
+        const blob = audioBufferToWav(buffer);
+        zip.file(`${name}.wav`, blob);
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${song.title.replace(/\s+/g, '-').toLowerCase()}-stems.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setRendering(null);
+    }
+  };
+
+  const onToggleStereoDouble = (enabled: boolean) => {
+    setStereoDouble(enabled);
+    player.stereoDouble = enabled;
+  };
+
   return (
     <div className="tab">
       <div className="panel">
@@ -118,7 +164,22 @@ export function SongForge() {
             <button className="stop" onClick={onStop}>■ Stop</button>
           )}
           <button onClick={onExport} disabled={!song}>⬇ Export MIDI</button>
+          <button onClick={onExportWav} disabled={!song || rendering !== null}>
+            {rendering === 'Rendering WAV mix...' ? '⏳ Rendering...' : '⬇ Export WAV'}
+          </button>
+          <button onClick={onExportStems} disabled={!song || rendering !== null}>
+            {rendering === 'Rendering stems...' ? '⏳ Rendering...' : '⬇ Export Stems (ZIP)'}
+          </button>
         </div>
+        <label className="toggle-label">
+          <input
+            type="checkbox"
+            checked={stereoDouble}
+            onChange={(e) => onToggleStereoDouble(e.target.checked)}
+          />
+          Stereo Double (L/R guitars)
+        </label>
+        {rendering && <p className="muted rendering-status">{rendering}</p>}
       </div>
 
       {song && (

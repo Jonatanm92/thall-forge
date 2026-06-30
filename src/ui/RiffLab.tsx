@@ -9,6 +9,8 @@ import { Rng, randomSeed } from '../engine/random';
 import { generatePattern } from '../engine/arranger';
 import { patternToMidi, downloadMidi } from '../engine/midi';
 import { player } from '../audio/playback';
+import { renderPatternToWav } from '../audio/exportWav';
+import { audioBufferToWav, downloadWav } from '../audio/wavEncoder';
 import type { GenerationParams, Pattern } from '../engine/types';
 
 export function RiffLab() {
@@ -16,6 +18,7 @@ export function RiffLab() {
   const [pattern, setPattern] = useState<Pattern | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playStep, setPlayStep] = useState(-1);
+  const [rendering, setRendering] = useState(false);
   const seedRef = useRef(params.seed);
 
   const build = (seed: number) => {
@@ -63,6 +66,18 @@ export function RiffLab() {
     downloadMidi(midi, `thall-forge-loop-${seedRef.current}`);
   };
 
+  const onExportWav = async () => {
+    if (!pattern) return;
+    setRendering(true);
+    try {
+      const buffer = await renderPatternToWav(pattern, params.bpm, { stereoDouble: player.stereoDouble });
+      const blob = audioBufferToWav(buffer);
+      downloadWav(blob, `thall-forge-loop-${seedRef.current}.wav`);
+    } finally {
+      setRendering(false);
+    }
+  };
+
   return (
     <div className="tab">
       <div className="panel">
@@ -87,6 +102,9 @@ export function RiffLab() {
             <button className="stop" onClick={onStop}>■ Stop</button>
           )}
           <button onClick={onExport} disabled={!pattern}>⬇ Export MIDI</button>
+          <button onClick={onExportWav} disabled={!pattern || rendering}>
+            {rendering ? '⏳ Rendering...' : '⬇ Export WAV'}
+          </button>
         </div>
         <p className="seed-line">seed <code>{seedRef.current}</code> · same seed + settings = same loop</p>
       </div>

@@ -45,6 +45,13 @@ export class ThallPlayer {
   private crash!: Tone.MetalSynth;
   private tom!: Tone.MembraneSynth;
 
+  // Stereo doubling (Right channel, panned hard R with +5 cent detune)
+  private guitarOpenR: Tone.PolySynth | null = null;
+  private guitarMuteR: Tone.PolySynth | null = null;
+  private guitarPanL!: Tone.Panner;
+  private guitarMutePanL!: Tone.Panner;
+  private _stereoDouble = false;
+
   private masterGain!: Tone.Gain;
   private onStep: StepCallback | null = null;
 
@@ -74,11 +81,12 @@ export class ThallPlayer {
     const openDist = new Tone.Distortion(0.85);
     openDist.oversample = '4x';
     const openEq = new Tone.EQ3({ low: 3, mid: -2, high: 2 });
+    this.guitarPanL = new Tone.Panner(0);
     this.guitarOpen = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'fatsawtooth', count: 3, spread: 28 },
       envelope: { attack: 0.002, decay: 0.12, sustain: 0.6, release: 0.25 },
     });
-    this.guitarOpen.chain(openHp, openDist, openEq, cabOut);
+    this.guitarOpen.chain(openHp, openDist, openEq, this.guitarPanL, cabOut);
     this.guitarOpen.volume.value = -12;
 
     // Mute chain: tighter pre-gain HP + scooped EQ -> percussive djent chug.
@@ -86,12 +94,40 @@ export class ThallPlayer {
     const muteDist = new Tone.Distortion(0.95);
     muteDist.oversample = '4x';
     const muteEq = new Tone.EQ3({ low: 4, mid: -4, high: 1 });
+    this.guitarMutePanL = new Tone.Panner(0);
     this.guitarMute = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'fatsawtooth', count: 3, spread: 22 },
       envelope: { attack: 0.001, decay: 0.06, sustain: 0.0, release: 0.05 },
     });
-    this.guitarMute.chain(muteHp, muteDist, muteEq, cabOut);
+    this.guitarMute.chain(muteHp, muteDist, muteEq, this.guitarMutePanL, cabOut);
     this.guitarMute.volume.value = -9;
+
+    // --- Stereo doubling: R-channel duplicates with +5 cent detune ---
+    const openHpR = new Tone.Filter(80, 'highpass');
+    const openDistR = new Tone.Distortion(0.85);
+    openDistR.oversample = '4x';
+    const openEqR = new Tone.EQ3({ low: 3, mid: -2, high: 2 });
+    const panR = new Tone.Panner(1);
+    this.guitarOpenR = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'fatsawtooth', count: 3, spread: 28 },
+      envelope: { attack: 0.002, decay: 0.12, sustain: 0.6, release: 0.25 },
+      detune: 5,
+    });
+    this.guitarOpenR.chain(openHpR, openDistR, openEqR, panR, cabOut);
+    this.guitarOpenR.volume.value = -12;
+
+    const muteHpR = new Tone.Filter(90, 'highpass');
+    const muteDistR = new Tone.Distortion(0.95);
+    muteDistR.oversample = '4x';
+    const muteEqR = new Tone.EQ3({ low: 4, mid: -4, high: 1 });
+    const panR2 = new Tone.Panner(1);
+    this.guitarMuteR = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'fatsawtooth', count: 3, spread: 22 },
+      envelope: { attack: 0.001, decay: 0.06, sustain: 0.0, release: 0.05 },
+      detune: 5,
+    });
+    this.guitarMuteR.chain(muteHpR, muteDistR, muteEqR, panR2, cabOut);
+    this.guitarMuteR.volume.value = -9;
 
     // --- Bass: gritty, sits under the guitar. ---
     const bassDist = new Tone.Distortion(0.4);
@@ -187,6 +223,21 @@ export class ThallPlayer {
 
   setMasterVolume(v: number): void {
     if (this.masterGain) this.masterGain.gain.rampTo(v, 0.05);
+  }
+
+  /** Enable/disable stereo guitar doubling (L/R with detune + timing offset). */
+  get stereoDouble(): boolean {
+    return this._stereoDouble;
+  }
+
+  set stereoDouble(enabled: boolean) {
+    this._stereoDouble = enabled;
+    if (this.initialized) {
+      // Pan L channel hard left when doubling, center when not
+      const panVal = enabled ? -1 : 0;
+      this.guitarPanL.pan.rampTo(panVal, 0.05);
+      this.guitarMutePanL.pan.rampTo(panVal, 0.05);
+    }
   }
 
   setOnStep(cb: StepCallback | null): void {
@@ -318,11 +369,20 @@ export class ThallPlayer {
       case 'guitar':
         if (note.palmMute) {
           this.guitarMute.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
+          if (this._stereoDouble && this.guitarMuteR) {
+            this.guitarMuteR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + 0.010, vel);
+          }
         } else {
           this.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
           note.voicing?.forEach((p) =>
             this.guitarOpen.triggerAttackRelease(midiToNote(p), note.duration, time, vel),
           );
+          if (this._stereoDouble && this.guitarOpenR) {
+            this.guitarOpenR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + 0.010, vel);
+            note.voicing?.forEach((p) =>
+              this.guitarOpenR!.triggerAttackRelease(midiToNote(p), note.duration, time + 0.010, vel),
+            );
+          }
         }
         break;
       case 'lead':
