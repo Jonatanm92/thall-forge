@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Enhanced synthesis quality and mixing: improve drum synthesis realism, add parallel compression / bus processing, implement velocity-sensitive articulations for guitar (pinch harmonics, slides, hammer-ons), and add a master mix bus with proper EQ/compression/limiting chain to make the output sound closer to a produced metal track.",
+  "status": "in_progress",
+  "steps": [
+    "Improve drum synthesis in src/audio/playback.ts: add velocity-sensitive parameters to kick (pitchDecay varies with velocity for more dynamic feel), add a snare 'rimshot' layer for high-velocity hits, add hi-hat opening amount based on duration (open vs closed articulation already exists but tie it to velocity curves). Add a drum bus with parallel compression (a wet-compressed channel blended with dry).",
+    "Add guitar articulations: in src/engine/riff.ts, tag certain hits with new articulation types (pinchHarmonic, slide, hammerOn) based on musical context (pinch harmonics on accented high notes, slides between consecutive melodic notes). Extend the Hit type in types.ts with an optional 'articulation' field. In playback.ts, render pinch harmonics with a higher-harmonic oscillator burst, slides with a pitch ramp.",
+    "Add a master mix bus in src/audio/playback.ts: multiband compression (or at minimum a Tone.MultibandCompressor), a gentle high-shelf boost for presence, and the existing limiter. This replaces the current simple gain -> limiter chain. The goal is a louder, fuller output that sounds more 'produced'.",
+    "Improve bass synthesis: replace the simple MonoSynth with a dual-layer approach (clean sub layer + distorted mid layer blended). This gives the bass more weight and definition simultaneously.",
+    "Add per-instrument volume controls exposed to the UI: guitar, bass, drums, lead level sliders in a 'Mix' section of SongForge/RiffLab. Store these in a MixSettings interface and pass to the player."
+  ],
+  "acceptance_criteria": [
+    "npm run build passes with no type errors",
+    "Hit type in types.ts includes optional articulation field",
+    "Playback engine has drum bus with parallel compression",
+    "Bass uses dual-layer synthesis (sub + grit)",
+    "Master chain includes multiband compression or equivalent",
+    "Mix controls (per-instrument volume) appear in the UI"
+  ],
+  "verification": ["Run `npm run build` in /projects/sandbox/thall-forge and confirm exit code 0"],
+  "blocked_reason": null,
+  "findings": ""
+}

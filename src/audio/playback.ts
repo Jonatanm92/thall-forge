@@ -1,12 +1,14 @@
 // In-browser playback engine built on Tone.js (v15).
 //
 // Renders generated patterns / songs to audio entirely client-side: a distorted
-// dual-voice guitar (separate palm-mute and open chains), a gritty bass, and a
-// fully synthesized metal kit. No samples required, so it runs anywhere.
+// dual-voice guitar (separate palm-mute and open chains), a dual-layer bass,
+// and a fully synthesized metal kit with parallel-compressed drum bus. The
+// master bus applies glue compression, presence EQ, and limiting for a
+// "produced" sound. No samples required, so it runs anywhere.
 
 import * as Tone from 'tone';
 import { midiToNote } from '../engine/theory';
-import type { Pattern, Song, TrackRole } from '../engine/types';
+import type { Articulation, MixSettings, Pattern, Song, TrackRole } from '../engine/types';
 import { DRUM } from '../engine/drums';
 import { makeAllCabIRs } from './ir';
 
@@ -18,6 +20,7 @@ export interface ScheduledNote {
   velocity: number;
   palmMute: boolean;
   voicing?: number[];
+  articulation?: Articulation;
 }
 
 export type StepCallback = (info: {
@@ -35,7 +38,8 @@ export class ThallPlayer {
   private guitarOpen!: Tone.PolySynth;
   private guitarMute!: Tone.PolySynth;
   private guitarCab!: Tone.Convolver;
-  private bass!: Tone.MonoSynth;
+  private bassSub!: Tone.MonoSynth;
+  private bassGrit!: Tone.MonoSynth;
   private kick!: Tone.MembraneSynth;
   private kickClick!: Tone.NoiseSynth;
   private snare!: Tone.NoiseSynth;
@@ -52,31 +56,70 @@ export class ThallPlayer {
   private guitarMutePanL!: Tone.Panner;
   private _stereoDouble = false;
 
+  // Pinch harmonic synth (high harmonic burst)
+  private pinchHarmonicSynth!: Tone.PolySynth;
+
+  // Bus gains for per-instrument volume control
+  private guitarBus!: Tone.Gain;
+  private bassBus!: Tone.Gain;
+  private drumBus!: Tone.Gain;
+  private leadBus!: Tone.Gain;
   private masterGain!: Tone.Gain;
+
   private onStep: StepCallback | null = null;
 
   async init(): Promise<void> {
     if (this.initialized) return;
     await Tone.start();
 
+    // ---- Master mix bus chain ----
+    // All instruments -> bus gains -> master compressor -> presence EQ -> limiter -> masterGain -> destination
     this.masterGain = new Tone.Gain(0.9).toDestination();
-    const limiter = new Tone.Limiter(-1).connect(this.masterGain);
+    const masterLimiter = new Tone.Limiter(-0.5).connect(this.masterGain);
+    const masterEq = new Tone.EQ3({ low: 0, mid: 0, high: 2, highFrequency: 8000 }).connect(masterLimiter);
+    const masterComp = new Tone.Compressor({
+      threshold: -18,
+      ratio: 3,
+      attack: 0.01,
+      release: 0.1,
+    }).connect(masterEq);
+
+    // ---- Per-instrument bus gains (for mix level control) ----
+    this.guitarBus = new Tone.Gain(1).connect(masterComp);
+    this.bassBus = new Tone.Gain(1).connect(masterComp);
+    this.leadBus = new Tone.Gain(1).connect(masterComp);
+
+    // ---- Drum bus with parallel compression ----
+    // Dry path: drumBus -> masterComp
+    // Wet path: drumBus -> drumCompressor -> drumWetGain -> masterComp
+    // The dry goes at full volume, the wet is mixed in at ~30%
+    this.drumBus = new Tone.Gain(1);
+    const drumDry = new Tone.Gain(1).connect(masterComp);
+    this.drumBus.connect(drumDry);
+    const drumCompressor = new Tone.Compressor({
+      threshold: -30,
+      ratio: 8,
+      attack: 0.003,
+      release: 0.05,
+    });
+    const drumWetGain = new Tone.Gain(0.3).connect(masterComp);
+    this.drumBus.connect(drumCompressor);
+    drumCompressor.connect(drumWetGain);
 
     // Shared convolution guitar cab (real speaker coloration). Falls back to a
     // plain low-pass if IR rendering is unavailable.
-    let cabOut: Tone.ToneAudioNode = limiter;
+    let cabOut: Tone.ToneAudioNode = this.guitarBus;
     try {
       const irs = await makeAllCabIRs();
       this.guitarCab = new Tone.Convolver();
       this.guitarCab.buffer = irs['modern-v30'];
-      this.guitarCab.connect(limiter);
+      this.guitarCab.connect(this.guitarBus);
       cabOut = this.guitarCab;
     } catch {
-      cabOut = new Tone.Filter(6000, 'lowpass').connect(limiter);
+      cabOut = new Tone.Filter(6000, 'lowpass').connect(this.guitarBus);
     }
 
     // --- Guitar: two voices for palm-muted chugs vs. open/ringing notes. ---
-    // 'fatsawtooth' = stacked detuned saws -> thick, doubled-guitar feel.
     const openHp = new Tone.Filter(80, 'highpass');
     const openDist = new Tone.Distortion(0.85);
     openDist.oversample = '4x';
@@ -129,28 +172,54 @@ export class ThallPlayer {
     this.guitarMuteR.chain(muteHpR, muteDistR, muteEqR, panR2, cabOut);
     this.guitarMuteR.volume.value = -9;
 
-    // --- Bass: gritty, sits under the guitar. ---
-    const bassDist = new Tone.Distortion(0.4);
-    const bassEq = new Tone.EQ3({ low: 6, mid: 1, high: -4 });
-    this.bass = new Tone.MonoSynth({
-      oscillator: { type: 'square' },
-      filter: { Q: 1, type: 'lowpass' },
-      envelope: { attack: 0.005, decay: 0.2, sustain: 0.5, release: 0.2 },
-      filterEnvelope: { attack: 0.005, decay: 0.1, sustain: 0.4, release: 0.2, baseFrequency: 120, octaves: 3 },
+    // --- Pinch harmonic synth: high-harmonic burst blended at low volume ---
+    const pinchDist = new Tone.Distortion(0.9);
+    pinchDist.oversample = '4x';
+    this.pinchHarmonicSynth = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'fatsawtooth', count: 2, spread: 40 },
+      envelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.03 },
     });
-    this.bass.connect(bassDist);
-    bassDist.connect(bassEq);
-    bassEq.connect(limiter);
-    this.bass.volume.value = -12;
+    this.pinchHarmonicSynth.chain(pinchDist, cabOut);
+    this.pinchHarmonicSynth.volume.value = -6;
 
-    // --- Drum kit (layered synthesis). ---
+    // --- Bass: dual-layer approach (sub + grit) ---
+    // Layer 1 (sub): sine/triangle with low-pass at 250Hz for clean sub
+    const subLp = new Tone.Filter(250, 'lowpass');
+    const subGain = new Tone.Gain(0.6).connect(this.bassBus);
+    subLp.connect(subGain);
+    this.bassSub = new Tone.MonoSynth({
+      oscillator: { type: 'triangle' },
+      filter: { Q: 1, type: 'lowpass', frequency: 300 },
+      envelope: { attack: 0.005, decay: 0.2, sustain: 0.6, release: 0.2 },
+      filterEnvelope: { attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.2, baseFrequency: 80, octaves: 2 },
+    });
+    this.bassSub.connect(subLp);
+    this.bassSub.volume.value = -10;
+
+    // Layer 2 (grit): sawtooth -> aggressive distortion -> band-pass ~800Hz
+    const gritDist = new Tone.Distortion(0.7);
+    const gritBp = new Tone.Filter(800, 'bandpass');
+    gritBp.Q.value = 1.5;
+    const gritGain = new Tone.Gain(0.4).connect(this.bassBus);
+    gritBp.connect(gritGain);
+    gritDist.connect(gritBp);
+    this.bassGrit = new Tone.MonoSynth({
+      oscillator: { type: 'sawtooth' },
+      filter: { Q: 2, type: 'lowpass', frequency: 2000 },
+      envelope: { attack: 0.005, decay: 0.15, sustain: 0.4, release: 0.15 },
+      filterEnvelope: { attack: 0.005, decay: 0.08, sustain: 0.3, release: 0.15, baseFrequency: 200, octaves: 3 },
+    });
+    this.bassGrit.connect(gritDist);
+    this.bassGrit.volume.value = -8;
+
+    // --- Drum kit (layered synthesis, all routed to drumBus). ---
     // Kick = membrane body + a short noise "click" for attack/beater snap.
     this.kick = new Tone.MembraneSynth({
       pitchDecay: 0.03,
       octaves: 6,
       envelope: { attack: 0.001, decay: 0.22, sustain: 0, release: 0.02 },
     });
-    this.kick.connect(limiter);
+    this.kick.connect(this.drumBus);
     this.kick.volume.value = -4;
     this.kickClick = new Tone.NoiseSynth({
       noise: { type: 'white' },
@@ -158,7 +227,7 @@ export class ThallPlayer {
     });
     const clickHp = new Tone.Filter(3500, 'highpass');
     this.kickClick.connect(clickHp);
-    clickHp.connect(limiter);
+    clickHp.connect(this.drumBus);
     this.kickClick.volume.value = -14;
 
     this.snare = new Tone.NoiseSynth({
@@ -167,7 +236,7 @@ export class ThallPlayer {
     });
     const snareHp = new Tone.Filter(1800, 'highpass');
     this.snare.connect(snareHp);
-    snareHp.connect(limiter);
+    snareHp.connect(this.drumBus);
     this.snare.volume.value = -10;
 
     this.snareBody = new Tone.MembraneSynth({
@@ -175,7 +244,7 @@ export class ThallPlayer {
       octaves: 3,
       envelope: { attack: 0.001, decay: 0.12, sustain: 0 },
     });
-    this.snareBody.connect(limiter);
+    this.snareBody.connect(this.drumBus);
     this.snareBody.volume.value = -16;
 
     this.hat = new Tone.MetalSynth({
@@ -187,7 +256,7 @@ export class ThallPlayer {
     });
     const hatHp = new Tone.Filter(8000, 'highpass');
     this.hat.connect(hatHp);
-    hatHp.connect(limiter);
+    hatHp.connect(this.drumBus);
     this.hat.volume.value = -22;
 
     this.ride = new Tone.MetalSynth({
@@ -197,7 +266,7 @@ export class ThallPlayer {
       resonance: 5000,
       octaves: 2,
     });
-    this.ride.connect(limiter);
+    this.ride.connect(this.drumBus);
     this.ride.volume.value = -24;
 
     this.crash = new Tone.MetalSynth({
@@ -207,7 +276,7 @@ export class ThallPlayer {
       resonance: 4000,
       octaves: 2.5,
     });
-    this.crash.connect(limiter);
+    this.crash.connect(this.drumBus);
     this.crash.volume.value = -24;
 
     this.tom = new Tone.MembraneSynth({
@@ -215,7 +284,7 @@ export class ThallPlayer {
       octaves: 4,
       envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
     });
-    this.tom.connect(limiter);
+    this.tom.connect(this.drumBus);
     this.tom.volume.value = -10;
 
     this.initialized = true;
@@ -223,6 +292,16 @@ export class ThallPlayer {
 
   setMasterVolume(v: number): void {
     if (this.masterGain) this.masterGain.gain.rampTo(v, 0.05);
+  }
+
+  /** Set per-instrument mix levels (all values 0-1). */
+  setMixLevels(mix: MixSettings): void {
+    if (!this.initialized) return;
+    this.guitarBus.gain.rampTo(mix.guitar, 0.05);
+    this.bassBus.gain.rampTo(mix.bass, 0.05);
+    this.drumBus.gain.rampTo(mix.drums, 0.05);
+    this.leadBus.gain.rampTo(mix.lead, 0.05);
+    this.masterGain.gain.rampTo(mix.master, 0.05);
   }
 
   /** Enable/disable stereo guitar doubling (L/R with detune + timing offset). */
@@ -263,6 +342,7 @@ export class ThallPlayer {
           velocity: hit.velocity,
           palmMute: !!hit.palmMute,
           voicing: hit.voicing,
+          articulation: hit.articulation,
         });
       }
     }
@@ -295,6 +375,7 @@ export class ThallPlayer {
               velocity: hit.velocity,
               palmMute: !!hit.palmMute,
               voicing: hit.voicing,
+              articulation: hit.articulation,
             });
           }
         }
@@ -367,37 +448,20 @@ export class ThallPlayer {
     const vel = Math.max(0.05, Math.min(1, note.velocity));
     switch (note.role) {
       case 'guitar':
-        if (note.palmMute) {
-          this.guitarMute.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
-          if (this._stereoDouble && this.guitarMuteR) {
-            this.guitarMuteR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + 0.010, vel);
-          }
-        } else {
-          this.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
-          note.voicing?.forEach((p) =>
-            this.guitarOpen.triggerAttackRelease(midiToNote(p), note.duration, time, vel),
-          );
-          if (this._stereoDouble && this.guitarOpenR) {
-            this.guitarOpenR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + 0.010, vel);
-            note.voicing?.forEach((p) =>
-              this.guitarOpenR!.triggerAttackRelease(midiToNote(p), note.duration, time + 0.010, vel),
-            );
-          }
-        }
+        this.triggerGuitar(note, time, vel);
         break;
       case 'lead':
         this.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel * 0.9);
         break;
       case 'bass':
-        this.bass.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
+        this.bassSub.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
+        this.bassGrit.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
         break;
       case 'kick':
-        this.kick.triggerAttackRelease('C1', '16n', time, vel);
-        this.kickClick.triggerAttackRelease('32n', time, vel * 0.9);
+        this.triggerKick(time, vel);
         break;
       case 'snare':
-        this.snare.triggerAttackRelease('16n', time, vel);
-        this.snareBody.triggerAttackRelease('D2', '16n', time, vel * 0.8);
+        this.triggerSnare(time, vel);
         break;
       case 'tom':
         this.tom.triggerAttackRelease(midiToNote(note.pitch - 12), '8n', time, vel);
@@ -407,6 +471,76 @@ export class ThallPlayer {
       case 'crash':
         this.triggerCymbal(note.pitch, time, vel);
         break;
+    }
+  }
+
+  private triggerGuitar(note: ScheduledNote, time: number, vel: number): void {
+    const art = note.articulation;
+
+    if (art === 'pinchHarmonic') {
+      // Play the note 2 octaves up with a very short envelope burst
+      const harmonicNote = midiToNote(note.pitch + 24);
+      this.pinchHarmonicSynth.triggerAttackRelease(harmonicNote, 0.08, time, vel);
+      // Also play the normal note at lower volume
+      this.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel * 0.5);
+      if (this._stereoDouble && this.guitarOpenR) {
+        this.guitarOpenR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + 0.010, vel * 0.5);
+      }
+      return;
+    }
+
+    if (art === 'hammerOn') {
+      // Play with lower velocity and slightly shorter attack (quicker onset)
+      const hammerVel = vel * 0.7;
+      this.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration * 0.8, time, hammerVel);
+      if (this._stereoDouble && this.guitarOpenR) {
+        this.guitarOpenR.triggerAttackRelease(midiToNote(note.pitch), note.duration * 0.8, time + 0.010, hammerVel);
+      }
+      return;
+    }
+
+    // For slides, we trigger normally (pitch ramp is handled by the scheduler
+    // in offline mode; in real-time we just play the note -- the effect is
+    // subtle enough that the rapid consecutive notes simulate the slide)
+    if (note.palmMute) {
+      this.guitarMute.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
+      if (this._stereoDouble && this.guitarMuteR) {
+        this.guitarMuteR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + 0.010, vel);
+      }
+    } else {
+      this.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
+      note.voicing?.forEach((p) =>
+        this.guitarOpen.triggerAttackRelease(midiToNote(p), note.duration, time, vel),
+      );
+      if (this._stereoDouble && this.guitarOpenR) {
+        this.guitarOpenR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + 0.010, vel);
+        note.voicing?.forEach((p) =>
+          this.guitarOpenR!.triggerAttackRelease(midiToNote(p), note.duration, time + 0.010, vel),
+        );
+      }
+    }
+  }
+
+  /** Velocity-sensitive kick: harder hits = faster pitch sweep = more attack. */
+  private triggerKick(time: number, vel: number): void {
+    // Adjust pitchDecay based on velocity (harder = faster sweep = punchier)
+    const pitchDecay = 0.05 - vel * 0.03; // range: 0.02 (hard) to 0.05 (soft)
+    this.kick.pitchDecay = pitchDecay;
+    this.kick.triggerAttackRelease('C1', '16n', time, vel);
+    this.kickClick.triggerAttackRelease('32n', time, vel * 0.9);
+  }
+
+  /** Velocity-sensitive snare: high velocity (>0.9) triggers rimshot behavior. */
+  private triggerSnare(time: number, vel: number): void {
+    if (vel > 0.9) {
+      // Rimshot: shorter decay + brighter noise filter for a cracking sound
+      this.snare.envelope.decay = 0.09;
+      this.snare.triggerAttackRelease('16n', time, vel);
+      this.snareBody.triggerAttackRelease('E2', '16n', time, vel * 0.9);
+    } else {
+      this.snare.envelope.decay = 0.16;
+      this.snare.triggerAttackRelease('16n', time, vel);
+      this.snareBody.triggerAttackRelease('D2', '16n', time, vel * 0.8);
     }
   }
 

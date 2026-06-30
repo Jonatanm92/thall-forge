@@ -1,0 +1,7 @@
+{
+  "task_id": "task-daw-production-features",
+  "task_description": "Add professional DAW workflow features and improve synthesis quality: WAV/stem export with stereo guitar doubling, song structure enhancements with tempo automation and DAW marker exports, and enhanced synthesis quality with better drums/bass/guitar articulations and a proper mix bus.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}

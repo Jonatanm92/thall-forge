@@ -53,6 +53,7 @@ function patternToSchedule(pattern: Pattern, bpm: number): {
         velocity: hit.velocity,
         palmMute: !!hit.palmMute,
         voicing: hit.voicing,
+        articulation: hit.articulation,
       });
     }
   }
@@ -82,6 +83,7 @@ function songToSchedule(song: Song): {
             velocity: hit.velocity,
             palmMute: !!hit.palmMute,
             voicing: hit.voicing,
+            articulation: hit.articulation,
           });
         }
       }
@@ -100,7 +102,9 @@ interface OfflineChain {
   guitarMute: Tone.PolySynth;
   guitarOpenR?: Tone.PolySynth;
   guitarMuteR?: Tone.PolySynth;
-  bass: Tone.MonoSynth;
+  pinchHarmonicSynth: Tone.PolySynth;
+  bassSub: Tone.MonoSynth;
+  bassGrit: Tone.MonoSynth;
   kick: Tone.MembraneSynth;
   kickClick: Tone.NoiseSynth;
   snare: Tone.NoiseSynth;
@@ -120,30 +124,56 @@ async function buildChain(
   filterGroup: StemGroup | null,
   stereoDouble: boolean,
 ): Promise<OfflineChain> {
-  // Create a master chain similar to ThallPlayer.init()
+  // ---- Master mix bus chain (mirrors ThallPlayer.init()) ----
   const masterGain = new Tone.Gain(0.9).toDestination();
-  const limiter = new Tone.Limiter(-1).connect(masterGain);
+  const masterLimiter = new Tone.Limiter(-0.5).connect(masterGain);
+  const masterEq = new Tone.EQ3({ low: 0, mid: 0, high: 2, highFrequency: 8000 }).connect(masterLimiter);
+  const masterComp = new Tone.Compressor({
+    threshold: -18,
+    ratio: 3,
+    attack: 0.01,
+    release: 0.1,
+  }).connect(masterEq);
 
   // Silent output for muted stems
   const silentGain = new Tone.Gain(0);
 
   function dest(group: StemGroup): Tone.ToneAudioNode {
-    if (filterGroup === null) return limiter;
-    return group === filterGroup ? limiter : silentGain;
+    if (filterGroup === null) return masterComp;
+    return group === filterGroup ? masterComp : silentGain;
   }
 
+  // ---- Per-instrument bus gains ----
+  const guitarBus = new Tone.Gain(1).connect(dest('guitar'));
+  const bassBus = new Tone.Gain(1).connect(dest('bass'));
+  const leadBus = new Tone.Gain(1).connect(dest('lead'));
+
+  // ---- Drum bus with parallel compression ----
+  const drumBusNode = new Tone.Gain(1);
+  const drumDry = new Tone.Gain(1).connect(dest('drums'));
+  drumBusNode.connect(drumDry);
+  const drumCompressor = new Tone.Compressor({
+    threshold: -30,
+    ratio: 8,
+    attack: 0.003,
+    release: 0.05,
+  });
+  const drumWetGain = new Tone.Gain(0.3).connect(dest('drums'));
+  drumBusNode.connect(drumCompressor);
+  drumCompressor.connect(drumWetGain);
+
   // Guitar cab IR -- build within the offline context
-  let guitarDest: Tone.ToneAudioNode = dest('guitar');
+  let guitarDest: Tone.ToneAudioNode = guitarBus;
   try {
     const sampleRate = Tone.getContext().sampleRate;
     const irBuf = await makeCabIR(sampleRate, 'modern-v30');
     const cabConv = new Tone.Convolver();
     cabConv.buffer = new Tone.ToneAudioBuffer(irBuf);
-    cabConv.connect(dest('guitar'));
+    cabConv.connect(guitarBus);
     guitarDest = cabConv;
   } catch {
     const fallback = new Tone.Filter(6000, 'lowpass');
-    fallback.connect(dest('guitar'));
+    fallback.connect(guitarBus);
     guitarDest = fallback;
   }
 
@@ -198,7 +228,7 @@ async function buildChain(
     guitarOpenR = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'fatsawtooth', count: 3, spread: 28 },
       envelope: { attack: 0.002, decay: 0.12, sustain: 0.6, release: 0.25 },
-      detune: 5, // +5 cents detune for width
+      detune: 5,
     });
     guitarOpenR.volume.value = -12;
     guitarOpenR.chain(openHpR, openDistR, openEqR, panR, guitarDest);
@@ -218,40 +248,51 @@ async function buildChain(
     guitarMuteR.chain(muteHpR, muteDistR, muteEqR, panR2, guitarDest);
   }
 
-  // Lead (reuses guitar open sound, routed to lead dest)
-  // For the lead stem we create a separate synth if filtering by lead,
-  // otherwise the guitar open synth handles both (trigger routes it).
-  // Lead is actually triggered through guitarOpen in ThallPlayer, but for stem
-  // isolation we need a separate instance routed to the lead destination.
-  const leadDest = dest('lead');
-  // We'll just use guitarOpen for lead when not filtering, but when filtering
-  // we need separate routing. To keep it simple, lead notes go through
-  // guitarOpen always -- the stem filter handles routing at the destination.
-  // (This is handled via the trigger function below.)
-
-  // Bass
-  const bassDist = new Tone.Distortion(0.4);
-  const bassEq = new Tone.EQ3({ low: 6, mid: 1, high: -4 });
-  const bass = new Tone.MonoSynth({
-    oscillator: { type: 'square' },
-    filter: { Q: 1, type: 'lowpass' },
-    envelope: { attack: 0.005, decay: 0.2, sustain: 0.5, release: 0.2 },
-    filterEnvelope: { attack: 0.005, decay: 0.1, sustain: 0.4, release: 0.2, baseFrequency: 120, octaves: 3 },
+  // Pinch harmonic synth
+  const pinchDist = new Tone.Distortion(0.9);
+  pinchDist.oversample = '4x';
+  const pinchHarmonicSynth = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'fatsawtooth', count: 2, spread: 40 },
+    envelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.03 },
   });
-  bass.connect(bassDist);
-  bassDist.connect(bassEq);
-  bassEq.connect(dest('bass'));
-  bass.volume.value = -12;
+  pinchHarmonicSynth.chain(pinchDist, guitarDest);
+  pinchHarmonicSynth.volume.value = -6;
 
-  // Drums
-  const drumDest = dest('drums');
+  // Bass: dual-layer (sub + grit)
+  const subLp = new Tone.Filter(250, 'lowpass');
+  const subGain = new Tone.Gain(0.6).connect(bassBus);
+  subLp.connect(subGain);
+  const bassSub = new Tone.MonoSynth({
+    oscillator: { type: 'triangle' },
+    filter: { Q: 1, type: 'lowpass', frequency: 300 },
+    envelope: { attack: 0.005, decay: 0.2, sustain: 0.6, release: 0.2 },
+    filterEnvelope: { attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.2, baseFrequency: 80, octaves: 2 },
+  });
+  bassSub.connect(subLp);
+  bassSub.volume.value = -10;
 
+  const gritDist = new Tone.Distortion(0.7);
+  const gritBp = new Tone.Filter(800, 'bandpass');
+  gritBp.Q.value = 1.5;
+  const gritGain = new Tone.Gain(0.4).connect(bassBus);
+  gritBp.connect(gritGain);
+  gritDist.connect(gritBp);
+  const bassGrit = new Tone.MonoSynth({
+    oscillator: { type: 'sawtooth' },
+    filter: { Q: 2, type: 'lowpass', frequency: 2000 },
+    envelope: { attack: 0.005, decay: 0.15, sustain: 0.4, release: 0.15 },
+    filterEnvelope: { attack: 0.005, decay: 0.08, sustain: 0.3, release: 0.15, baseFrequency: 200, octaves: 3 },
+  });
+  bassGrit.connect(gritDist);
+  bassGrit.volume.value = -8;
+
+  // Drums (all routed to drumBusNode)
   const kick = new Tone.MembraneSynth({
     pitchDecay: 0.03,
     octaves: 6,
     envelope: { attack: 0.001, decay: 0.22, sustain: 0, release: 0.02 },
   });
-  kick.connect(drumDest);
+  kick.connect(drumBusNode);
   kick.volume.value = -4;
 
   const kickClick = new Tone.NoiseSynth({
@@ -260,7 +301,7 @@ async function buildChain(
   });
   const clickHp = new Tone.Filter(3500, 'highpass');
   kickClick.connect(clickHp);
-  clickHp.connect(drumDest);
+  clickHp.connect(drumBusNode);
   kickClick.volume.value = -14;
 
   const snare = new Tone.NoiseSynth({
@@ -269,7 +310,7 @@ async function buildChain(
   });
   const snareHp = new Tone.Filter(1800, 'highpass');
   snare.connect(snareHp);
-  snareHp.connect(drumDest);
+  snareHp.connect(drumBusNode);
   snare.volume.value = -10;
 
   const snareBody = new Tone.MembraneSynth({
@@ -277,7 +318,7 @@ async function buildChain(
     octaves: 3,
     envelope: { attack: 0.001, decay: 0.12, sustain: 0 },
   });
-  snareBody.connect(drumDest);
+  snareBody.connect(drumBusNode);
   snareBody.volume.value = -16;
 
   const hat = new Tone.MetalSynth({
@@ -289,7 +330,7 @@ async function buildChain(
   });
   const hatHp = new Tone.Filter(8000, 'highpass');
   hat.connect(hatHp);
-  hatHp.connect(drumDest);
+  hatHp.connect(drumBusNode);
   hat.volume.value = -22;
 
   const ride = new Tone.MetalSynth({
@@ -299,7 +340,7 @@ async function buildChain(
     resonance: 5000,
     octaves: 2,
   });
-  ride.connect(drumDest);
+  ride.connect(drumBusNode);
   ride.volume.value = -24;
 
   const crash = new Tone.MetalSynth({
@@ -309,7 +350,7 @@ async function buildChain(
     resonance: 4000,
     octaves: 2.5,
   });
-  crash.connect(drumDest);
+  crash.connect(drumBusNode);
   crash.volume.value = -24;
 
   const tom = new Tone.MembraneSynth({
@@ -317,27 +358,20 @@ async function buildChain(
     octaves: 4,
     envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
   });
-  tom.connect(drumDest);
+  tom.connect(drumBusNode);
   tom.volume.value = -10;
 
-  // For lead stem isolation, we need a separate signal path for lead notes.
-  // We handle this in the trigger function by routing to leadDest when the
-  // note role is 'lead'. Create a dedicated lead synth.
-  if (filterGroup === 'lead' || filterGroup === null) {
-    // Lead uses the same guitar-open sound but may go to a different dest
-    // For simplicity in the full mix (filterGroup === null) lead goes through
-    // guitarOpen (matching ThallPlayer behavior). For stem isolation, we
-    // still use guitarOpen since it connects to limiter (same dest).
-    // The leadDest variable is only different when filterGroup === 'lead'.
-    void leadDest; // consumed via the trigger closure below
-  }
+  // Suppress unused variable for lead bus (used implicitly via dest('lead'))
+  void leadBus;
 
   return {
     guitarOpen,
     guitarMute,
     guitarOpenR,
     guitarMuteR,
-    bass,
+    pinchHarmonicSynth,
+    bassSub,
+    bassGrit,
     kick,
     kickClick,
     snare,
@@ -367,37 +401,20 @@ function triggerNote(
 
   switch (note.role) {
     case 'guitar':
-      if (note.palmMute) {
-        chain.guitarMute.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
-        if (stereoDouble && chain.guitarMuteR) {
-          chain.guitarMuteR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + DOUBLE_OFFSET, vel);
-        }
-      } else {
-        chain.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
-        note.voicing?.forEach((p) =>
-          chain.guitarOpen.triggerAttackRelease(midiToNote(p), note.duration, time, vel),
-        );
-        if (stereoDouble && chain.guitarOpenR) {
-          chain.guitarOpenR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + DOUBLE_OFFSET, vel);
-          note.voicing?.forEach((p) =>
-            chain.guitarOpenR!.triggerAttackRelease(midiToNote(p), note.duration, time + DOUBLE_OFFSET, vel),
-          );
-        }
-      }
+      triggerGuitarNote(chain, note, time, vel, stereoDouble);
       break;
     case 'lead':
       chain.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel * 0.9);
       break;
     case 'bass':
-      chain.bass.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
+      chain.bassSub.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
+      chain.bassGrit.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
       break;
     case 'kick':
-      chain.kick.triggerAttackRelease('C1', '16n', time, vel);
-      chain.kickClick.triggerAttackRelease('32n', time, vel * 0.9);
+      triggerKickNote(chain, time, vel);
       break;
     case 'snare':
-      chain.snare.triggerAttackRelease('16n', time, vel);
-      chain.snareBody.triggerAttackRelease('D2', '16n', time, vel * 0.8);
+      triggerSnareNote(chain, time, vel);
       break;
     case 'tom':
       chain.tom.triggerAttackRelease(midiToNote(note.pitch - 12), '8n', time, vel);
@@ -407,6 +424,72 @@ function triggerNote(
     case 'crash':
       triggerCymbal(chain, note.pitch, time, vel);
       break;
+  }
+}
+
+function triggerGuitarNote(
+  chain: OfflineChain,
+  note: ScheduledNote,
+  time: number,
+  vel: number,
+  stereoDouble: boolean,
+): void {
+  const art = note.articulation;
+
+  if (art === 'pinchHarmonic') {
+    const harmonicNote = midiToNote(note.pitch + 24);
+    chain.pinchHarmonicSynth.triggerAttackRelease(harmonicNote, 0.08, time, vel);
+    chain.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel * 0.5);
+    if (stereoDouble && chain.guitarOpenR) {
+      chain.guitarOpenR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + DOUBLE_OFFSET, vel * 0.5);
+    }
+    return;
+  }
+
+  if (art === 'hammerOn') {
+    const hammerVel = vel * 0.7;
+    chain.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration * 0.8, time, hammerVel);
+    if (stereoDouble && chain.guitarOpenR) {
+      chain.guitarOpenR.triggerAttackRelease(midiToNote(note.pitch), note.duration * 0.8, time + DOUBLE_OFFSET, hammerVel);
+    }
+    return;
+  }
+
+  if (note.palmMute) {
+    chain.guitarMute.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
+    if (stereoDouble && chain.guitarMuteR) {
+      chain.guitarMuteR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + DOUBLE_OFFSET, vel);
+    }
+  } else {
+    chain.guitarOpen.triggerAttackRelease(midiToNote(note.pitch), note.duration, time, vel);
+    note.voicing?.forEach((p) =>
+      chain.guitarOpen.triggerAttackRelease(midiToNote(p), note.duration, time, vel),
+    );
+    if (stereoDouble && chain.guitarOpenR) {
+      chain.guitarOpenR.triggerAttackRelease(midiToNote(note.pitch), note.duration, time + DOUBLE_OFFSET, vel);
+      note.voicing?.forEach((p) =>
+        chain.guitarOpenR!.triggerAttackRelease(midiToNote(p), note.duration, time + DOUBLE_OFFSET, vel),
+      );
+    }
+  }
+}
+
+function triggerKickNote(chain: OfflineChain, time: number, vel: number): void {
+  const pitchDecay = 0.05 - vel * 0.03;
+  chain.kick.pitchDecay = pitchDecay;
+  chain.kick.triggerAttackRelease('C1', '16n', time, vel);
+  chain.kickClick.triggerAttackRelease('32n', time, vel * 0.9);
+}
+
+function triggerSnareNote(chain: OfflineChain, time: number, vel: number): void {
+  if (vel > 0.9) {
+    chain.snare.envelope.decay = 0.09;
+    chain.snare.triggerAttackRelease('16n', time, vel);
+    chain.snareBody.triggerAttackRelease('E2', '16n', time, vel * 0.9);
+  } else {
+    chain.snare.envelope.decay = 0.16;
+    chain.snare.triggerAttackRelease('16n', time, vel);
+    chain.snareBody.triggerAttackRelease('D2', '16n', time, vel * 0.8);
   }
 }
 

@@ -309,3 +309,45 @@ button.tiny { padding: 0.3rem 0.7rem; font-size: 0.78rem; }
   .tabs { width: 100%; }
   .tab-btn { flex: 1; justify-content: center; }
 }
+
+/* Mix Panel */
+.mix-panel {
+  margin-top: 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.mix-panel h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mix-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.mix-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+}
+.mix-slider span:first-child {
+  width: 52px;
+  color: var(--muted);
+}
+.mix-slider input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.mix-slider .mix-value {
+  width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.75rem;
+}

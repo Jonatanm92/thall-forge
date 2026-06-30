@@ -8,7 +8,7 @@
 
 import { Rng } from './random';
 import { buildScale, lowString, snapToScale } from './theory';
-import type { Hit, ScaleName, Track, Tuning } from './types';
+import type { Hit, ScaleName, Track, Tuning, Articulation } from './types';
 import type { RhythmOnset } from './rhythm';
 
 export interface RiffOptions {
@@ -55,6 +55,13 @@ export function generateRiff(opts: RiffOptions): Track {
       if (span >= 3 && complexity > 0.55 && rng.chance(0.5)) {
         emitRun(hits, target, scalePitches, onset, span, rng);
       } else {
+        // Determine articulation for melodic notes
+        let articulation: Articulation | undefined;
+        const isHighInScale = target >= root + 9; // top of the scale range
+        if (onset.accent && isHighInScale && rng.chance(0.15)) {
+          articulation = 'pinchHarmonic';
+        }
+
         hits.push({
           step: onset.step,
           duration: Math.min(span, rng.int(2, 4)),
@@ -62,6 +69,7 @@ export function generateRiff(opts: RiffOptions): Track {
           velocity: 0.95,
           palmMute: false,
           accent: true,
+          articulation,
         });
       }
     } else if (onset.accent) {
@@ -107,13 +115,29 @@ function emitRun(
   const noteCount = Math.min(span, rng.int(2, 3));
   for (let n = 0; n < noteCount; n++) {
     const idx = clampIndex(startIdx + dir * n, scalePitches.length);
+    const prevIdx = n > 0 ? clampIndex(startIdx + dir * (n - 1), scalePitches.length) : -1;
+    const pitch = scalePitches[idx];
+    const prevPitch = prevIdx >= 0 ? scalePitches[prevIdx] : -1;
+    const interval = prevPitch >= 0 ? Math.abs(pitch - prevPitch) : 0;
+
+    // Tag articulations on run notes
+    let articulation: Articulation | undefined;
+    if (n > 0 && interval >= 1 && interval <= 3) {
+      // Consecutive melodic notes 1-3 semitones apart -> slide
+      articulation = 'slide';
+    } else if (n > 0 && n < noteCount - 1 && interval <= 2) {
+      // Short note following a longer note within 1-2 steps -> hammerOn
+      articulation = 'hammerOn';
+    }
+
     hits.push({
       step: onset.step + n,
       duration: 1,
-      pitch: scalePitches[idx],
+      pitch,
       velocity: n === 0 ? 0.95 : 0.85,
       palmMute: false,
       accent: n === 0,
+      articulation,
     });
   }
 }

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { GenControls, DEFAULT_PARAMS } from './GenControls';
 import { StepGrid } from './StepGrid';
 import { TabView } from './TabView';
+import { MixPanel } from './MixPanel';
 import { Rng, randomSeed } from '../engine/random';
 import { generatePattern } from '../engine/arranger';
 import { patternToMidi, downloadMidi } from '../engine/midi';
@@ -107,6 +108,7 @@ export function RiffLab() {
           </button>
         </div>
         <p className="seed-line">seed <code>{seedRef.current}</code> · same seed + settings = same loop</p>
+        <MixPanel />
       </div>
 
       {pattern && (

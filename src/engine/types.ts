@@ -5,6 +5,9 @@
 // djent / thall rhythmic writing (syncopated palm-muted 16ths grouped in odd
 // numbers over a steady 4/4 pulse).
 
+/** Guitar/lead articulation types for expressive playback. */
+export type Articulation = 'pinchHarmonic' | 'slide' | 'hammerOn';
+
 /** A single musical event on the step grid. */
 export interface Hit {
   /** Step index from the start of the pattern (0-based). */
@@ -29,6 +32,8 @@ export interface Hit {
    * and MIDI export for swing/humanization. Positive = slightly late.
    */
   microShift?: number;
+  /** Optional guitar/lead articulation for expressive synthesis rendering. */
+  articulation?: Articulation;
 }
 
 /** A named lane of hits (e.g. "kick", "bass", "guitar"). */
@@ -149,4 +154,13 @@ export interface GenerationParams {
   seed: number;
   /** Song form / structure preset for the arranger. */
   songForm: SongFormId;
+}
+
+/** Per-instrument volume levels (0-1 range) for the mix bus. */
+export interface MixSettings {
+  guitar: number;
+  bass: number;
+  drums: number;
+  lead: number;
+  master: number;
 }

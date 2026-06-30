@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { GenControls, DEFAULT_PARAMS } from './GenControls';
+import { MixPanel } from './MixPanel';
 import { randomSeed } from '../engine/random';
 import { generateSong } from '../engine/arranger';
 import { songToMidi, downloadMidi } from '../engine/midi';
@@ -193,6 +194,7 @@ export function SongForge() {
           Stereo Double (L/R guitars)
         </label>
         {rendering && <p className="muted rendering-status">{rendering}</p>}
+        <MixPanel />
       </div>
 
       {song && (
