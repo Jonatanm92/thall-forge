@@ -96,6 +96,11 @@ export const SCALE_NAMES: ScaleName[] = [
   'chromatic',
 ];
 
+/** The semitone intervals (from the root) that make up a scale. */
+export function getScaleIntervals(scale: ScaleName): number[] {
+  return SCALE_INTERVALS[scale];
+}
+
 /**
  * Build a list of scale pitches across a range, given a root pitch class and
  * a low/high MIDI bound.

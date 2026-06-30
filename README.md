@@ -12,10 +12,21 @@ Three tools in one:
 | 🎸 **Tone Rig** | Describe a tone (or upload a reference track) → the engine designs a full amp/cab/FX rig. Audition it latency-free, tweak the knobs, export a preset + signal-chain spec. |
 
 ### Richer musical output
+- **Harmonic motion** — the chug root follows a per-bar progression through scale degrees (bVI, bII, iv, bVII...), so riffs move through chords instead of camping on the tonic.
+- **Phrasing modes** — *motif* (a bar-length idea repeated with variation), *polymeter* (one odd-length motif tiled so it phases against the 4/4 bar lines — the Meshuggah trick), or *free*.
 - **Power chords & sustains** — accented hits become root+5th(+octave) voicings; melodic accents ring out or fire short scale runs.
 - **Lead lines** — choruses/outros get an upper-register, singable melody over the riff.
-- **Odd meters** — optional per-section time-signature shifts (e.g. a breakdown in 7/4) for prog/thall feel.
-- **Playable tab** — the generated riff is rendered to standard ASCII tab for your tuning, copy/screenshot ready.
+- **Odd meters** — optional per-section time-signature shifts (e.g. a breakdown in 7/4).
+- **Playable tab** — the generated riff is rendered to standard ASCII tab for your tuning.
+
+### Drums that play like a metal drummer
+- Kick **locks to the riff**, with sustained **double-bass** and alternating **blast beats** in high-intensity sections.
+- **Ghost-note** snares, **china / ride-bell** accents, and varied phrase-ending **fills** (tom roll / snare roll / mixed, with a crescendo into the downbeat).
+
+### Groove & feel
+- **Humanize** — subtle random timing + velocity variation (tighter on kick/snare, looser on fills) baked deterministically into the notes.
+- **Swing** — pushes the off-beat 16ths late for a shuffled feel.
+- Both are honored identically by in-browser playback **and** the exported MIDI.
 
 ### Higher-fidelity sound
 - **Convolution cabs** — guitar (in both the song player and the live rig) runs through procedurally-rendered speaker-cab impulse responses, not just a low-pass.
@@ -92,7 +103,7 @@ audio-gen endpoint/key.
 ```
 src/
   engine/      pure generation logic (no DOM/audio)
-    theory, rhythm, riff, lead, bass, drums, arranger, midi, tab, random, types
+    theory, rhythm, harmony, riff, lead, bass, drums, humanize, arranger, midi, tab, random, types
   audio/       Tone.js playback + guitar rig + tone engine + cab IRs
     playback, rig, tonePresets, ir
   ai/          optional LLM integration (config + tone + prompt parsing)

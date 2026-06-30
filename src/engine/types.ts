@@ -24,6 +24,11 @@ export interface Hit {
    * chords / dyads). Absolute MIDI numbers, not intervals.
    */
   voicing?: number[];
+  /**
+   * Optional micro-timing offset in (fractional) steps, applied by the player
+   * and MIDI export for swing/humanization. Positive = slightly late.
+   */
+  microShift?: number;
 }
 
 /** A named lane of hits (e.g. "kick", "bass", "guitar"). */
@@ -119,6 +124,14 @@ export interface GenerationParams {
   beatsPerBar: number;
   /** Allow the arranger to shift some sections into odd meters. */
   allowMeterShifts: boolean;
+  /** Rhythmic phrasing mode. */
+  phrasing: import('./rhythm').Phrasing;
+  /** 0..1 — how often the chord root moves off the tonic. */
+  harmonicMotion: number;
+  /** 0..1 — random timing/velocity humanization. */
+  humanize: number;
+  /** 0..1 — swing applied to off-beat 16ths. */
+  swing: number;
   /** Deterministic seed so a "generation" can be reproduced. */
   seed: number;
 }

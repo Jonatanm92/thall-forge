@@ -203,8 +203,9 @@ export class ThallPlayer {
     const notes: ScheduledNote[] = [];
     for (const track of pattern.tracks) {
       for (const hit of track.hits) {
+        const t = (hit.step + (hit.microShift ?? 0)) * stepDur;
         notes.push({
-          time: hit.step * stepDur,
+          time: Math.max(0, t),
           role: track.role,
           pitch: hit.pitch,
           duration: Math.max(stepDur * 0.4, hit.duration * stepDur),
@@ -234,8 +235,9 @@ export class ThallPlayer {
         const base = cursorSteps;
         for (const track of pattern.tracks) {
           for (const hit of track.hits) {
+            const t = (base + hit.step + (hit.microShift ?? 0)) * stepDur;
             notes.push({
-              time: (base + hit.step) * stepDur,
+              time: Math.max(0, t),
               role: track.role,
               pitch: hit.pitch,
               duration: Math.max(stepDur * 0.4, hit.duration * stepDur),

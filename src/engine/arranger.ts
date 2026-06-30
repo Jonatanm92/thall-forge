@@ -1,13 +1,15 @@
-// The arranger ties the rhythm, riff, bass, drum and lead generators together
-// into either a single loopable pattern or a full multi-section song — the
-// "Suno for metal" arrangement layer (structure + parts, rendered locally).
+// The arranger ties the rhythm, harmony, riff, bass, drum and lead generators
+// together into either a single loopable pattern or a full multi-section song —
+// the "Suno for metal" arrangement layer (structure + parts, rendered locally).
 
 import { Rng } from './random';
 import { generateRhythm, barsToSteps, type RhythmOnset } from './rhythm';
+import { generateProgression, offsetLabel } from './harmony';
 import { generateRiff } from './riff';
 import { generateBass } from './bass';
 import { generateDrums } from './drums';
 import { generateLead } from './lead';
+import { applyGroove } from './humanize';
 import { getTuning } from './theory';
 import type {
   GenerationParams,
@@ -26,6 +28,8 @@ interface PatternOptions {
   intensity?: Intensity;
   complexityBoost?: number;
   onsets?: RhythmOnset[];
+  /** Per-bar harmonic root offsets (shared across repeats of a section). */
+  rootOffsets?: number[];
   /** Override the time signature numerator for this pattern. */
   beatsPerBar?: number;
   /** Add a lead/melody line on top of the riff. */
@@ -42,12 +46,23 @@ export function generatePattern(
     intensity = 'mid',
     complexityBoost = 0,
     onsets: presetOnsets,
+    rootOffsets: presetOffsets,
     beatsPerBar = params.beatsPerBar,
     withLead = false,
   } = opts;
   const tuning = getTuning(params.tuningId);
+  const stepsPerBar = beatsPerBar * STEPS_PER_BEAT;
   const length = barsToSteps(params.barsPerPattern, beatsPerBar, STEPS_PER_BEAT);
   const complexity = clamp01(params.complexity + complexityBoost);
+
+  const rootOffsets =
+    presetOffsets ??
+    generateProgression({
+      bars: params.barsPerPattern,
+      scale: params.scale,
+      harmonicMotion: params.harmonicMotion,
+      rng,
+    });
 
   const onsets =
     presetOnsets ??
@@ -56,36 +71,24 @@ export function generatePattern(
       style: params.style,
       complexity,
       syncopation: params.syncopation,
+      phrasing: params.phrasing,
+      stepsPerBar,
       rng,
     });
 
   const guitar = generateRiff({
-    onsets,
-    tuning,
-    key: params.key,
-    scale: params.scale,
-    complexity,
-    rng,
+    onsets, tuning, key: params.key, scale: params.scale,
+    complexity, rootOffsets, stepsPerBar, rng,
   });
 
   const bass = generateBass({
-    guitar,
-    tuning,
-    key: params.key,
-    scale: params.scale,
-    complexity,
-    rng,
+    guitar, tuning, key: params.key, scale: params.scale,
+    complexity, rootOffsets, stepsPerBar, rng,
   });
 
   const drums = generateDrums({
-    onsets,
-    length,
-    stepsPerBeat: STEPS_PER_BEAT,
-    beatsPerBar,
-    style: params.style,
-    complexity,
-    intensity,
-    rng,
+    onsets, length, stepsPerBeat: STEPS_PER_BEAT, beatsPerBar,
+    style: params.style, complexity, intensity, rng,
   });
 
   const tracks: Track[] = [guitar, bass, ...drums];
@@ -93,16 +96,19 @@ export function generatePattern(
   if (withLead) {
     tracks.push(
       generateLead({
-        length,
-        stepsPerBeat: STEPS_PER_BEAT,
-        tuning,
-        key: params.key,
-        scale: params.scale,
-        complexity,
-        rng,
+        length, stepsPerBeat: STEPS_PER_BEAT, tuning,
+        key: params.key, scale: params.scale, complexity, rng,
       }),
     );
   }
+
+  // Final groove pass — swing + humanization baked into the hits.
+  applyGroove(tracks, {
+    humanize: params.humanize,
+    swing: params.swing,
+    stepsPerBeat: STEPS_PER_BEAT,
+    rng,
+  });
 
   return { length, stepsPerBeat: STEPS_PER_BEAT, beatsPerBar, tracks };
 }
@@ -132,13 +138,11 @@ const SONG_FORM: SectionBlueprint[] = [
 /** Decide the meter for each riff key (deterministic from the song rng). */
 function assignMeters(params: GenerationParams, rng: Rng): Map<string, number> {
   const meters = new Map<string, number>();
-  const keys = ['A', 'B', 'C', 'D'];
-  for (const k of keys) {
+  for (const k of ['A', 'B', 'C', 'D']) {
     if (!params.allowMeterShifts) {
       meters.set(k, params.beatsPerBar);
       continue;
     }
-    // Breakdown (D) and pre-chorus (B) are the usual spots for an odd meter.
     if (k === 'D') meters.set(k, rng.pick([7, 5, 6]));
     else if (k === 'B') meters.set(k, rng.pick([params.beatsPerBar, 6, 5]));
     else meters.set(k, params.beatsPerBar);
@@ -150,58 +154,57 @@ function assignMeters(params: GenerationParams, rng: Rng): Map<string, number> {
 export function generateSong(params: GenerationParams): Song {
   const rng = new Rng(params.seed);
   const tuning = getTuning(params.tuningId);
-
   const meterByKey = assignMeters(params, rng);
 
-  // Pre-generate one rhythmic skeleton per distinct riffKey so repeats line up.
+  // Pre-generate a rhythm skeleton AND a harmonic progression per riffKey so
+  // every occurrence of a section is musically identical.
   const skeletons = new Map<string, RhythmOnset[]>();
+  const progressions = new Map<string, number[]>();
   for (const bp of SONG_FORM) {
-    if (bp.riffKey && !skeletons.has(bp.riffKey)) {
-      const meter = meterByKey.get(bp.riffKey) ?? params.beatsPerBar;
-      const length = barsToSteps(params.barsPerPattern, meter, STEPS_PER_BEAT);
-      const isBreakdown = bp.name === 'Breakdown';
-      skeletons.set(
-        bp.riffKey,
-        generateRhythm({
-          length,
-          style: params.style,
-          complexity: clamp01(
-            params.complexity + (isBreakdown ? -0.3 : bp.complexityBoost),
-          ),
-          syncopation: isBreakdown ? params.syncopation * 0.4 : params.syncopation,
-          rng,
-        }),
-      );
-    }
+    if (!bp.riffKey || skeletons.has(bp.riffKey)) continue;
+    const meter = meterByKey.get(bp.riffKey) ?? params.beatsPerBar;
+    const length = barsToSteps(params.barsPerPattern, meter, STEPS_PER_BEAT);
+    const isBreakdown = bp.name === 'Breakdown';
+    skeletons.set(
+      bp.riffKey,
+      generateRhythm({
+        length,
+        style: params.style,
+        complexity: clamp01(params.complexity + (isBreakdown ? -0.3 : bp.complexityBoost)),
+        syncopation: isBreakdown ? params.syncopation * 0.4 : params.syncopation,
+        phrasing: params.phrasing,
+        stepsPerBar: meter * STEPS_PER_BEAT,
+        rng,
+      }),
+    );
+    progressions.set(
+      bp.riffKey,
+      generateProgression({
+        bars: params.barsPerPattern,
+        scale: params.scale,
+        // Breakdowns usually hammer one root; reduce their motion.
+        harmonicMotion: isBreakdown ? params.harmonicMotion * 0.3 : params.harmonicMotion,
+        rng,
+      }),
+    );
   }
 
   const sections: Section[] = SONG_FORM.map((bp, i) => {
-    const onsets = bp.riffKey ? skeletons.get(bp.riffKey) : undefined;
-    const beatsPerBar = bp.riffKey ? meterByKey.get(bp.riffKey) : params.beatsPerBar;
     const pattern = generatePattern(params, {
       rng,
       intensity: bp.intensity,
       complexityBoost: bp.complexityBoost,
-      onsets,
-      beatsPerBar,
+      onsets: bp.riffKey ? skeletons.get(bp.riffKey) : undefined,
+      rootOffsets: bp.riffKey ? progressions.get(bp.riffKey) : undefined,
+      beatsPerBar: bp.riffKey ? meterByKey.get(bp.riffKey) : params.beatsPerBar,
       withLead: bp.lead,
     });
-    return {
-      id: `${bp.name}-${i}`,
-      name: bp.name,
-      repeats: bp.repeats,
-      pattern,
-    };
+    return { id: `${bp.name}-${i}`, name: bp.name, repeats: bp.repeats, pattern };
   });
 
-  const totalBars = sections.reduce(
-    (n, s) => n + s.repeats * params.barsPerPattern,
-    0,
-  );
-
-  const meterList = [...new Set([...meterByKey.values()])]
-    .map((m) => `${m}/4`)
-    .join(', ');
+  const totalBars = sections.reduce((n, s) => n + s.repeats * params.barsPerPattern, 0);
+  const meterList = [...new Set([...meterByKey.values()])].map((m) => `${m}/4`).join(', ');
+  const progA = (progressions.get('A') ?? [0]).map(offsetLabel).join(' – ');
 
   return {
     title: generateTitle(rng),
@@ -212,9 +215,10 @@ export function generateSong(params: GenerationParams): Song {
     sections,
     notes: [
       `${params.style} feel in ${params.key} ${params.scale}, ${tuning.name}.`,
-      `${totalBars} bars @ ${params.bpm} BPM across ${sections.length} sections.`,
-      `Meters used: ${meterList}${params.allowMeterShifts ? ' (odd-meter shifts on)' : ''}.`,
-      `Core riff skeletons: A=intro/verse, B=pre-chorus, C=chorus (with lead), D=breakdown.`,
+      `${totalBars} bars @ ${params.bpm} BPM across ${sections.length} sections (${params.phrasing} phrasing).`,
+      `Meters: ${meterList}${params.allowMeterShifts ? ' (odd-meter shifts on)' : ''}.`,
+      `Main riff (A) progression: ${progA}.`,
+      `Groove: swing ${Math.round(params.swing * 100)}%, humanize ${Math.round(params.humanize * 100)}%.`,
       `Seed ${params.seed} — same seed + settings always regenerates this exact song.`,
     ],
   };

@@ -49,15 +49,16 @@ export function songToMidi(song: Song): Midi {
           roleTracks.get(track.role) ??
           { name: track.name, events: [] };
         for (const hit of track.hits) {
+          const t = (baseStep + hit.step + (hit.microShift ?? 0)) * spStep;
           entry.events.push({
-            time: (baseStep + hit.step) * spStep,
+            time: Math.max(0, t),
             duration: Math.max(spStep * 0.5, hit.duration * spStep),
             midi: hit.pitch,
             velocity: hit.velocity,
           });
           hit.voicing?.forEach((p) =>
             entry.events.push({
-              time: (baseStep + hit.step) * spStep,
+              time: Math.max(0, t),
               duration: Math.max(spStep * 0.5, hit.duration * spStep),
               midi: p,
               velocity: hit.velocity,
@@ -101,16 +102,17 @@ export function patternToMidi(
     track.name = t.name;
     track.channel = channelForRole(t.role);
     for (const hit of t.hits) {
+      const time = Math.max(0, (hit.step + (hit.microShift ?? 0)) * spStep);
       track.addNote({
         midi: hit.pitch,
-        time: hit.step * spStep,
+        time,
         duration: Math.max(spStep * 0.5, hit.duration * spStep),
         velocity: Math.max(0, Math.min(1, hit.velocity)),
       });
       hit.voicing?.forEach((p) =>
         track.addNote({
           midi: p,
-          time: hit.step * spStep,
+          time,
           duration: Math.max(spStep * 0.5, hit.duration * spStep),
           velocity: Math.max(0, Math.min(1, hit.velocity)),
         }),

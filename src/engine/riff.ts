@@ -1,9 +1,10 @@
 // Generates a guitar riff track from a rhythmic skeleton.
 //
 // The thall idiom: the bulk of the riff is palm-muted chugs on the lowest
-// (dropped) string sitting on the root, with melodic "lifts" up the scale on
-// accents. This version adds power-chord voicings, sustained ringing notes and
-// short melodic runs so riffs read as actual playable parts, not just chugs.
+// (dropped) string, with melodic "lifts" up the scale on accents. The chug root
+// follows a per-bar harmonic progression (see harmony.ts) so the riff actually
+// moves through chords instead of sitting on the tonic. Power-chord voicings,
+// sustained ringing notes and short melodic runs round it out.
 
 import { Rng } from './random';
 import { buildScale, lowString, snapToScale } from './theory';
@@ -16,33 +17,41 @@ export interface RiffOptions {
   key: string;
   scale: ScaleName;
   complexity: number;
+  /** Per-bar root offsets in semitones above the tonic. */
+  rootOffsets: number[];
+  /** Steps per bar, to map an onset to its bar's chord. */
+  stepsPerBar: number;
   rng: Rng;
 }
 
 export function generateRiff(opts: RiffOptions): Track {
-  const { onsets, tuning, key, scale, complexity, rng } = opts;
+  const { onsets, tuning, key, scale, complexity, rootOffsets, stepsPerBar, rng } = opts;
 
-  const root = lowString(tuning); // open low string == the riff's tonic
-  const scalePitches = buildScale(key, scale, root, root + 24);
+  const tonic = lowString(tuning); // open low string == the riff's tonic
+  const scalePitches = buildScale(key, scale, tonic, tonic + 26);
+
+  const offsetFor = (step: number) =>
+    rootOffsets.length ? rootOffsets[Math.floor(step / stepsPerBar) % rootOffsets.length] : 0;
 
   const hits: Hit[] = [];
   for (let i = 0; i < onsets.length; i++) {
     const onset = onsets[i];
     const nextStep = onsets[i + 1]?.step ?? onset.step + onset.cell;
     const span = Math.max(1, nextStep - onset.step);
+    const root = tonic + offsetFor(onset.step); // this bar's chord root
 
     const melodic = onset.accent && rng.chance(0.4 + complexity * 0.4);
 
     if (melodic) {
-      // Pick a scale tone above the root, weighted toward closer tones.
+      // Pick a scale tone in the octave above this bar's root.
+      const window = scalePitches.filter((p) => p >= root && p <= root + 12);
+      const pool = window.length ? window : scalePitches;
       const idx = Math.min(
-        scalePitches.length - 1,
-        Math.floor(Math.abs(rng.next() - rng.next()) * scalePitches.length),
+        pool.length - 1,
+        Math.floor(Math.abs(rng.next() - rng.next()) * pool.length),
       );
-      const target = snapToScale(scalePitches[idx], scalePitches);
+      const target = snapToScale(pool[idx], scalePitches);
 
-      // High complexity + room => a short ascending/descending run; else a
-      // single sustained note ringing into the gap.
       if (span >= 3 && complexity > 0.55 && rng.chance(0.5)) {
         emitRun(hits, target, scalePitches, onset, span, rng);
       } else {
@@ -69,7 +78,7 @@ export function generateRiff(opts: RiffOptions): Track {
         voicing,
       });
     } else {
-      // Bread-and-butter palm-muted root chug.
+      // Bread-and-butter palm-muted chug on this bar's root.
       hits.push({
         step: onset.step,
         duration: 1,

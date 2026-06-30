@@ -15,6 +15,10 @@ export const DEFAULT_PARAMS: GenerationParams = {
   barsPerPattern: 2,
   beatsPerBar: 4,
   allowMeterShifts: false,
+  phrasing: 'motif',
+  harmonicMotion: 0.4,
+  humanize: 0.3,
+  swing: 0,
   seed: 1337,
 };
 
@@ -113,6 +117,43 @@ export function GenControls({ params, onChange }: Props) {
           onChange={(e) => set('allowMeterShifts', e.target.checked)}
         />
       </label>
+      <Select
+        label="Phrasing"
+        value={params.phrasing}
+        options={[
+          { value: 'motif', label: 'Motif (repeat + vary)' },
+          { value: 'polymeter', label: 'Polymeter (phasing loop)' },
+          { value: 'free', label: 'Free (most varied)' },
+        ]}
+        onChange={(v) => set('phrasing', v as GenerationParams['phrasing'])}
+      />
+      <Slider
+        label="Harmonic motion"
+        value={params.harmonicMotion}
+        min={0}
+        max={1}
+        step={0.01}
+        format={(v) => `${Math.round(v * 100)}%`}
+        onChange={(v) => set('harmonicMotion', v)}
+      />
+      <Slider
+        label="Humanize"
+        value={params.humanize}
+        min={0}
+        max={1}
+        step={0.01}
+        format={(v) => `${Math.round(v * 100)}%`}
+        onChange={(v) => set('humanize', v)}
+      />
+      <Slider
+        label="Swing"
+        value={params.swing}
+        min={0}
+        max={1}
+        step={0.01}
+        format={(v) => `${Math.round(v * 100)}%`}
+        onChange={(v) => set('swing', v)}
+      />
     </div>
   );
 }
